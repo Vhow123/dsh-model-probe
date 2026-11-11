@@ -1,0 +1,13 @@
+node_modules/
+.git/
+test/.edge-profile/
+test/vendor/
+test/ui-result.png
+.link-plugin.cjs
+package.profile.before-install.json
+*.log
+.client-graph.txt
+.resolved-desktop.json
+*.bak-*
+test/debug-react.mjs
+.DS_Store

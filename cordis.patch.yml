@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-model-probe
+      name: "@local/dsh-model-probe"

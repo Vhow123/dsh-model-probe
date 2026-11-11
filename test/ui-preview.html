@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>模型测速 · 界面验收</title><style>html,body,#app{margin:0;height:100%;background:#161616;font-family:system-ui,"Microsoft YaHei",sans-serif}</style></head>
+<body><div id="app"></div>
+<script>
+(async () => {
+  window.addEventListener('error', event => { document.body.dataset.lastError = `${event.message} @ ${event.filename}:${event.lineno}`; });
+  window.module = undefined; window.exports = undefined; window.define = undefined;
+  const originalFetch = window.fetch;
+  window.fetch = (url, options) => originalFetch(typeof url === 'string' && url.startsWith('/api/dsh-model-probe') ? `/proxy${url}` : url, options);
+  for (const src of ['/test/vendor/react.js', '/test/vendor/react-dom.js']) {
+    const source = await (await originalFetch(src)).text();
+    (0, eval)(`${source}\n//# sourceURL=${src}`);
+  }
+  const [zh, en] = await Promise.all(['/locale/zh.json', '/locale/en.json'].map(url => originalFetch(url).then(r => r.json())));
+  const listeners = new Set();
+  const dictionaries = new Map();
+  const slots = new Map();
+  const ctx = {
+    effect(fn) { fn(); },
+    locale: {
+      register(ns, dicts) { dictionaries.set(ns, dicts); listeners.forEach(fn => fn()); },
+      subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+      getSnapshot() { return { revision: 0 }; },
+      bind(ns) { return key => dictionaries.get(ns)?.zh?.[key] || key; },
+    },
+    slots: {
+      inject(name, fn) { fn(); },
+      register(options, Component) { slots.set(options.id, Component); },
+    },
+  };
+  window.__slots = slots;
+  window.__ModuleLoader__ = {
+    load({ factory }) {
+      const plugin = factory(id => ({ react: window.React, 'react-dom': window.ReactDOM, './locale/zh.json': zh, './locale/en.json': en })[id]);
+      plugin.apply(ctx);
+      const Launcher = slots.get('dsh-model-probe');
+      ReactDOM.createRoot(document.getElementById('app')).render(React.createElement(Launcher, { wide: true }));
+      requestAnimationFrame(() => document.querySelector('.dmp-launcher').click());
+    },
+  };
+  (0, eval)(await (await originalFetch('/client.js')).text());
+})();
+</script>
+</body></html>
