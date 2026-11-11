@@ -2,6 +2,8 @@
 
 一个直接接入 DSH 当前模型路由的连接测试插件。侧栏底部提供「模型测速」入口，不单独保存 API 地址或密钥。
 
+![模型测速界面](assets/model-probe.png)
+
 ## 下载安装
 
 - **[下载最新 ZIP 安装包](https://github.com/Vhow123/dsh-model-probe/releases/latest/download/dsh-model-probe.zip)**

@@ -1,10 +1,14 @@
 {
   "name": "@local/dsh-model-probe",
   "version": "1.0.0",
-  "private": true,
   "type": "module",
-  "description": "DSH model connectivity and latency probe",
-  "license": "UNLICENSED",
+  "description": "Test DSH model connectivity, first-response latency, total elapsed time and token usage.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Vhow123/dsh-model-probe.git"
+  },
+  "homepage": "https://github.com/Vhow123/dsh-model-probe#readme",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -26,5 +30,5 @@
     "test": "node --test test/*.test.js",
     "check": "node --check index.js && node --check client.js"
   },
-  "files": ["index.js", "client.js", "locale", "icon.svg", "README.md"]
+  "files": ["index.js", "client.js", "locale", "icon.svg", "cordis.patch.yml", "screenshots.json", "assets", "README.md"]
 }
