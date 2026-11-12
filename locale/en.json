@@ -1,18 +1,19 @@
 {
   "meta": {
     "title": "Model Probe",
-    "description": "Test model connectivity, latency, token usage, and static SVG generation."
+    "description": "Test model connectivity, latency, token usage, and animated SVG generation."
   },
   "title": "Model Probe",
-  "subtitle": "Check live connectivity and static SVG generation",
+  "subtitle": "Check live connectivity and animated SVG generation",
   "testType": "Test type",
   "connectionTest": "Connectivity",
-  "svgTest": "SVG probe",
-  "staticPreview": "Static preview",
-  "svgReady": "SVG probe completed · static preview ready",
+  "svgTest": "Animated SVG probe",
+  "staticPreview": "Animated preview",
+  "svgReady": "SVG probe completed · animated preview ready",
+  "animations": "animations",
   "svgSource": "Sanitized SVG source (plain text)",
-  "svgNotice": "Static content only; animation, scripts, and external resources are removed.",
-  "svgPromptHint": "Generate a static SVG of a pelican riding a bicycle",
+  "svgNotice": "Native SVG animation is preserved; scripts, external resources, and events are removed.",
+  "svgPromptHint": "Generate a looping animated SVG of a pelican riding a bicycle",
   "testAll": "Test all",
   "testSelected": "Test selected",
   "testOne": "Test this model",

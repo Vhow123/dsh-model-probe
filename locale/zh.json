@@ -1,18 +1,19 @@
 {
   "meta": {
     "title": "模型测速",
-    "description": "测试模型连接、耗时、Token 用量和静态 SVG 绘图能力。"
+    "description": "测试模型连接、耗时、Token 用量和动态 SVG 绘图能力。"
   },
   "title": "模型测速",
-  "subtitle": "检查模型实时连接，并测试静态 SVG 绘图能力",
+  "subtitle": "检查模型实时连接，并测试动态 SVG 绘图能力",
   "testType": "测试类型",
   "connectionTest": "连接检测",
-  "svgTest": "SVG 检测",
-  "staticPreview": "静态预览",
-  "svgReady": "SVG 检测完成 · 静态预览可用",
+  "svgTest": "SVG 动画检测",
+  "staticPreview": "动画预览",
+  "svgReady": "SVG 动画检测完成 · 动画预览可用",
+  "animations": "处动画",
   "svgSource": "清洗后的 SVG 源码（纯文本）",
-  "svgNotice": "仅显示静态内容；动画、脚本和外部资源不会保留。",
-  "svgPromptHint": "生成鹈鹕骑自行车的静态 SVG",
+  "svgNotice": "保留原生 SVG 动画；脚本、外部资源和事件已移除。",
+  "svgPromptHint": "生成鹈鹕骑自行车的循环动画 SVG",
   "testAll": "测试全部",
   "testSelected": "测试已选",
   "testOne": "测试此模型",

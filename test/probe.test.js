@@ -85,28 +85,45 @@ test('external stop aborts the model stream', async () => {
   assert.match(result.message, /测试已停止/);
 });
 
-test('SVG probe requests the pelican fixture and returns sanitized source', async () => {
+test('SVG probe requests an animated pelican fixture and returns sanitized source', async () => {
   const result = await probeModel(llmWith(async function* (options) {
-    assert.match(options.messages[0].content[0].text, /pelican riding a bicycle/);
+    assert.match(options.messages[0].content[0].text, /animated SVG of a pelican riding a bicycle/);
+    assert.match(options.messages[0].content[0].text, /repeatCount="indefinite"/);
     assert.equal(options.maxTokens, 16384);
-    yield { type: 'text-delta', text: '```svg\n<svg viewBox="0 0 10 10" onload="alert(1)"><rect width="10" height="10"/><script>alert(1)</script></svg>\n```' };
+    yield { type: 'text-delta', text: '```svg\n<svg viewBox="0 0 10 10" onload="alert(1)"><rect width="10" height="10"><animate attributeName="x" values="0;5;0" dur="3s" repeatCount="indefinite"/></rect><script>alert(1)</script></svg>\n```' };
     yield { type: 'finish', reason: { kind: 'stop' } };
   }), { provider: 'one', model: 'model-a', type: 'svg' });
   assert.equal(result.ok, true);
   assert.equal(result.type, 'svg');
-  assert.equal(result.svg, '<svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>');
+  assert.equal(result.svg, '<svg viewBox="0 0 10 10"><rect width="10" height="10"><animate attributeName="x" values="0;5;0" dur="3s" repeatCount="indefinite"/></rect></svg>');
+  assert.equal(result.animationCount, 1);
   assert.equal(result.svgBytes, Buffer.byteLength(result.svg));
   assert.equal(result.request.maxTokens, 16384);
 });
 
-test('SVG sanitizer removes active content, animation and external resources', () => {
-  const { svg } = sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg" style="background:url(https://example.test)"><style>*{fill:red}</style><animate attributeName="x" to="1"/><image href="https://example.test/a.png"/><a xlink:href="javascript:alert(1)"><circle r="4" fill="url(#ok)"/></a></svg>');
+test('SVG sanitizer preserves native animation but removes active and external content', () => {
+  const { svg, animationCount } = sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg" style="background:url(https://example.test)"><style>*{fill:red}</style><animate attributeName="x" to="1"/><image href="https://example.test/a.png"/><a xlink:href="javascript:alert(1)"><circle r="4" fill="url(#ok)"/></a></svg>');
   assert.equal(svg.includes('<script'), false);
   assert.equal(svg.includes('<style'), false);
-  assert.equal(svg.includes('<animate'), false);
+  assert.equal(svg.includes('<animate attributeName="x"'), true);
+  assert.equal(animationCount, 1);
   assert.equal(svg.includes('<image'), false);
   assert.equal(/onload|href|style=|javascript:|https:/.test(svg), false);
   assert.match(svg, /fill="url\(#ok\)"/);
+});
+
+test('SVG probe marks a static drawing as not meeting the animation fixture', async () => {
+  const result = await probeModel(llmWith(async function* () {
+    yield { type: 'text-delta', text: '<svg><circle r="4"/></svg>' };
+    yield { type: 'finish', reason: { kind: 'stop' } };
+  }), { provider: 'one', model: 'model-a', type: 'svg' });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'STATIC_SVG');
+  assert.equal(result.animationCount, 0);
+});
+
+test('SVG sanitizer rejects animations that target links or events', () => {
+  assert.throws(() => sanitizeSvg('<svg><rect width="10" height="10"><animate attributeName="href" values="https://example.test"/></rect></svg>'), /动画不能修改/);
 });
 
 test('SVG probe rejects replies without a complete SVG', async () => {

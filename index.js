@@ -10,7 +10,7 @@ const SVG_TIMEOUT = 300000;
 const SVG_MAX_TOKENS = 16384;
 const SVG_MAX_BYTES = 32768;
 const PROMPT = 'Reply with OK only.';
-const SVG_PROMPT = 'Generate an SVG of a pelican riding a bicycle. Reply with the SVG code only.\n\nOutput a complete static SVG only. Do not use scripts, animation, external resources or links.';
+const SVG_PROMPT = 'Generate an animated SVG of a pelican riding a bicycle. Reply with SVG code only.\n\nUse native SVG SMIL animation, especially <animate> and <animateTransform>, to visibly rotate the bicycle wheels and move the pelican or bicycle. Include at least one visible looping animation with repeatCount="indefinite" and a duration between 2 and 6 seconds. Nest animation elements inside their target shapes. Output one complete SVG only. Do not use scripts, CSS, <style>, <use>, external resources or links.';
 
 function textOf(error) {
   return error instanceof Error ? error.message : String(error);
@@ -90,17 +90,25 @@ export function sanitizeSvg(text) {
     .replace(/<\?[\s\S]*?\?>/g, '')
     .replace(/<!DOCTYPE[\s\S]*?>/gi, '')
     .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<(script|foreignObject|iframe|object|embed|image|use|style|animate|animateMotion|animateTransform|set|discard)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
-    .replace(/<(script|foreignObject|iframe|object|embed|image|use|style|animate|animateMotion|animateTransform|set|discard)\b[^>]*\/\s*>/gi, '')
+    .replace(/<(script|foreignObject|iframe|object|embed|image|use|style|discard)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+    .replace(/<(script|foreignObject|iframe|object|embed|image|use|style|discard)\b[^>]*\/\s*>/gi, '')
     .replace(/\s+(?:on[a-z0-9_-]+|href|xlink:href|src|srcdoc|style)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/url\(\s*['"]?\s*(?!#)[^)]*\)/gi, 'none');
-  if (/<(?:script|foreignObject|iframe|object|embed|image|use|style|animate|animateMotion|animateTransform|set|discard)\b/i.test(svg) || /\son[a-z0-9_-]+\s*=/i.test(svg) || /(?:javascript|data):/i.test(svg)) {
-    throw new Error('SVG 含有不支持的动态或外部内容');
+  if (/<(?:script|foreignObject|iframe|object|embed|image|use|style|discard)\b/i.test(svg) || /\son[a-z0-9_-]+\s*=/i.test(svg) || /(?:javascript|data):/i.test(svg)) {
+    throw new Error('SVG 含有不支持的脚本或外部内容');
+  }
+  for (const tag of svg.matchAll(/<(?:animate|animateMotion|animateTransform|set)\b[^>]*>/gi)) {
+    const attribute = tag[0].match(/\battributeName\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    const target = (attribute?.[1] || attribute?.[2] || attribute?.[3] || '').trim().toLowerCase();
+    if (target.startsWith('on') || ['href', 'xlink:href', 'src', 'style'].includes(target)) {
+      throw new Error('SVG 动画不能修改事件、链接或样式属性');
+    }
   }
   svg = svg.trim();
   const bytes = Buffer.byteLength(svg, 'utf8');
+  const animationCount = (svg.match(/<(?:animate|animateMotion|animateTransform)\b/gi) || []).length;
   if (bytes > SVG_MAX_BYTES) throw new Error(`清洗后 SVG 超过 ${SVG_MAX_BYTES / 1024} KiB`);
-  return { svg, bytes };
+  return { svg, bytes, animationCount };
 }
 
 export async function probeModel(llm, input, signal) {
@@ -166,9 +174,15 @@ export async function probeModel(llm, input, signal) {
     };
     if (isSvg) {
       try {
-        const { svg, bytes } = sanitizeSvg(reply);
+        const { svg, bytes, animationCount } = sanitizeSvg(reply);
         result.svg = svg;
         result.svgBytes = bytes;
+        result.animationCount = animationCount;
+        if (!animationCount) {
+          result.ok = false;
+          result.code = 'STATIC_SVG';
+          result.message = '模型返回的 SVG 没有原生动画';
+        }
       } catch (error) {
         result.ok = false;
         result.code = 'INVALID_SVG';

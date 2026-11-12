@@ -43,18 +43,23 @@ if (!process.env.DMP_INSPECT_ONLY) {
 }
 const selectedType = await evaluate("document.querySelector('.dmp-toolbar select').value");
 if (!process.env.DMP_INSPECT_ONLY) {
-  await evaluate("document.querySelector('.dmp-model .dmp-detail-btn').click(); true");
+  await evaluate("(() => { const rows = [...document.querySelectorAll('.dmp-model')]; window.__dmpTestRow = rows.find(row => row.textContent.includes('deepseek-flash')) || rows[0]; window.__dmpTestRow.querySelector('.dmp-detail-btn').click(); return true; })()");
   for (let i = 0; i < 1280; i++) {
     if (await evaluate("document.querySelector('.dmp-badge-success') !== null || document.querySelector('.dmp-badge-error') !== null")) break;
     await new Promise(resolve => setTimeout(resolve, 250));
   }
 }
-const tested = await evaluate("({ badge: document.querySelector('.dmp-badge')?.textContent, result: document.querySelector('.dmp-model-sub')?.textContent, preview: !!document.querySelector('.dmp-svg-frame'), notice: document.querySelector('.dmp-svg-caption')?.textContent })");
+const tested = await evaluate("({ badge: window.__dmpTestRow?.querySelector('.dmp-badge')?.textContent, result: window.__dmpTestRow?.querySelector('.dmp-model-sub')?.textContent, preview: !!window.__dmpTestRow?.querySelector('.dmp-svg-frame'), notice: window.__dmpTestRow?.querySelector('.dmp-svg-caption')?.textContent })");
+const clip = await evaluate("(() => { const rect = document.querySelector('.dmp-svg-frame')?.getBoundingClientRect(); return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height, scale: 1 } : null; })()");
+const frameA = clip ? await call('Page.captureScreenshot', { format: 'png', clip }) : null;
+await new Promise(resolve => setTimeout(resolve, 1200));
+const frameB = clip ? await call('Page.captureScreenshot', { format: 'png', clip }) : null;
+const animationFramesDiffer = !!frameA && !!frameB && frameA.data !== frameB.data;
 await evaluate("(() => { if (!document.querySelector('.dmp-svg-source')) document.querySelector('.dmp-model [title=\"技术详情\"]').click(); return true; })()");
 await new Promise(resolve => setTimeout(resolve, 500));
 const source = await evaluate("(() => { const details = document.querySelector('.dmp-svg-source'); if (details) details.open = true; return { source: !!details, text: document.querySelector('.dmp-svg-source pre')?.textContent.slice(0, 100) }; })()");
 const screenshot = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
 await writeFile(new URL('./svg-ui-result.png', import.meta.url), Buffer.from(screenshot.data, 'base64'));
-console.log(JSON.stringify({ initial, selectedType, tested, source, errors }, null, 2));
+console.log(JSON.stringify({ initial, selectedType, tested, animationFramesDiffer, source, errors }, null, 2));
 ws.close();
-if (errors.length || selectedType !== 'svg' || tested.badge !== '成功' || !tested.preview || !source.source) process.exitCode = 1;
+if (errors.length || selectedType !== 'svg' || tested.badge !== '成功' || !tested.preview || !animationFramesDiffer || !source.source) process.exitCode = 1;
