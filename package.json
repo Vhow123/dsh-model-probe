@@ -1,8 +1,8 @@
 {
   "name": "@local/dsh-model-probe",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
-  "description": "Test DSH model connectivity, first-response latency, total elapsed time and token usage.",
+  "description": "Test DSH model connectivity, latency, token usage, and sanitized static SVG generation.",
   "license": "MIT",
   "repository": {
     "type": "git",

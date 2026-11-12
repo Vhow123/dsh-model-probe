@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { probeModel, readCatalog } from '../index.js';
+import { probeModel, readCatalog, sanitizeSvg } from '../index.js';
 
 function llmWith(stream) {
   return { stream };
@@ -83,6 +83,45 @@ test('external stop aborts the model stream', async () => {
   const result = await resultPromise;
   assert.equal(result.ok, false);
   assert.match(result.message, /测试已停止/);
+});
+
+test('SVG probe requests the pelican fixture and returns sanitized source', async () => {
+  const result = await probeModel(llmWith(async function* (options) {
+    assert.match(options.messages[0].content[0].text, /pelican riding a bicycle/);
+    assert.equal(options.maxTokens, 16384);
+    yield { type: 'text-delta', text: '```svg\n<svg viewBox="0 0 10 10" onload="alert(1)"><rect width="10" height="10"/><script>alert(1)</script></svg>\n```' };
+    yield { type: 'finish', reason: { kind: 'stop' } };
+  }), { provider: 'one', model: 'model-a', type: 'svg' });
+  assert.equal(result.ok, true);
+  assert.equal(result.type, 'svg');
+  assert.equal(result.svg, '<svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>');
+  assert.equal(result.svgBytes, Buffer.byteLength(result.svg));
+  assert.equal(result.request.maxTokens, 16384);
+});
+
+test('SVG sanitizer removes active content, animation and external resources', () => {
+  const { svg } = sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg" style="background:url(https://example.test)"><style>*{fill:red}</style><animate attributeName="x" to="1"/><image href="https://example.test/a.png"/><a xlink:href="javascript:alert(1)"><circle r="4" fill="url(#ok)"/></a></svg>');
+  assert.equal(svg.includes('<script'), false);
+  assert.equal(svg.includes('<style'), false);
+  assert.equal(svg.includes('<animate'), false);
+  assert.equal(svg.includes('<image'), false);
+  assert.equal(/onload|href|style=|javascript:|https:/.test(svg), false);
+  assert.match(svg, /fill="url\(#ok\)"/);
+});
+
+test('SVG probe rejects replies without a complete SVG', async () => {
+  const result = await probeModel(llmWith(async function* () {
+    yield { type: 'text-delta', text: 'I cannot draw that.' };
+    yield { type: 'finish', reason: { kind: 'stop' } };
+  }), { provider: 'one', model: 'model-a', type: 'svg' });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'INVALID_SVG');
+  assert.match(result.message, /完整的 SVG/);
+});
+
+test('SVG sanitizer enforces the 32 KiB output limit', () => {
+  const source = `<svg><desc>${'x'.repeat(33000)}</desc></svg>`;
+  assert.throws(() => sanitizeSvg(source), /32 KiB/);
 });
 
 test('inputs reject missing routes', async () => {

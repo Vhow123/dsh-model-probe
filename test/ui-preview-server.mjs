@@ -9,7 +9,7 @@ const server = http.createServer(async (req, res) => {
     let body = '';
     for await (const chunk of req) body += chunk;
     const target = pathname.slice('/proxy'.length);
-    const upstream = await fetch(`http://127.0.0.1:64119${target}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    const upstream = await fetch(`http://127.0.0.1:56215${target}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
     res.writeHead(upstream.status, { 'content-type': 'application/json' });
     res.end(await upstream.text());
     return;

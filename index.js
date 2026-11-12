@@ -6,7 +6,11 @@ export const inject = ['webServer', 'llm'];
 const API = '/api/dsh-model-probe';
 const DEFAULT_TIMEOUT = 45000;
 const DEFAULT_MAX_TOKENS = 32;
+const SVG_TIMEOUT = 300000;
+const SVG_MAX_TOKENS = 16384;
+const SVG_MAX_BYTES = 32768;
 const PROMPT = 'Reply with OK only.';
+const SVG_PROMPT = 'Generate an SVG of a pelican riding a bicycle. Reply with the SVG code only.\n\nOutput a complete static SVG only. Do not use scripts, animation, external resources or links.';
 
 function textOf(error) {
   return error instanceof Error ? error.message : String(error);
@@ -78,19 +82,43 @@ export async function readCatalog(llm) {
   return { groups, total: groups.reduce((sum, group) => sum + group.models.length, 0) };
 }
 
+export function sanitizeSvg(text) {
+  const source = String(text || '').replace(/^\uFEFF/, '');
+  const match = source.match(/<svg(?:\s[^>]*)?>[\s\S]*?<\/svg\s*>/i);
+  if (!match) throw new Error('模型回复中没有完整的 SVG');
+  let svg = match[0]
+    .replace(/<\?[\s\S]*?\?>/g, '')
+    .replace(/<!DOCTYPE[\s\S]*?>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<(script|foreignObject|iframe|object|embed|image|use|style|animate|animateMotion|animateTransform|set|discard)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+    .replace(/<(script|foreignObject|iframe|object|embed|image|use|style|animate|animateMotion|animateTransform|set|discard)\b[^>]*\/\s*>/gi, '')
+    .replace(/\s+(?:on[a-z0-9_-]+|href|xlink:href|src|srcdoc|style)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/url\(\s*['"]?\s*(?!#)[^)]*\)/gi, 'none');
+  if (/<(?:script|foreignObject|iframe|object|embed|image|use|style|animate|animateMotion|animateTransform|set|discard)\b/i.test(svg) || /\son[a-z0-9_-]+\s*=/i.test(svg) || /(?:javascript|data):/i.test(svg)) {
+    throw new Error('SVG 含有不支持的动态或外部内容');
+  }
+  svg = svg.trim();
+  const bytes = Buffer.byteLength(svg, 'utf8');
+  if (bytes > SVG_MAX_BYTES) throw new Error(`清洗后 SVG 超过 ${SVG_MAX_BYTES / 1024} KiB`);
+  return { svg, bytes };
+}
+
 export async function probeModel(llm, input, signal) {
   const provider = typeof input.provider === 'string' ? input.provider.trim() : '';
   const model = typeof input.model === 'string' ? input.model.trim() : '';
   if (!provider || !model) throw new Error('provider 和 model 不能为空');
-  const timeoutMs = Math.max(3000, Math.min(120000, Number(input.timeoutMs) || DEFAULT_TIMEOUT));
-  const maxTokens = Math.max(1, Math.min(512, Number(input.maxTokens) || DEFAULT_MAX_TOKENS));
+  const type = input.type === 'svg' ? 'svg' : 'connection';
+  const isSvg = type === 'svg';
+  const timeoutMs = Math.max(3000, Math.min(isSvg ? 600000 : 120000, Number(input.timeoutMs) || (isSvg ? SVG_TIMEOUT : DEFAULT_TIMEOUT)));
+  const maxTokens = Math.max(1, Math.min(isSvg ? SVG_MAX_TOKENS : 512, Number(input.maxTokens) || (isSvg ? SVG_MAX_TOKENS : DEFAULT_MAX_TOKENS)));
+  const prompt = isSvg ? SVG_PROMPT : PROMPT;
   const startedAt = Date.now();
   const started = performance.now();
   const controller = new AbortController();
   const abort = () => controller.abort(new Error('测试已停止'));
   if (signal?.aborted) abort();
   else signal?.addEventListener('abort', abort, { once: true });
-  const timer = setTimeout(() => controller.abort(new Error(`连接测试超时（${Math.round(timeoutMs / 1000)} 秒）`)), timeoutMs);
+  const timer = setTimeout(() => controller.abort(new Error(`${isSvg ? 'SVG 检测' : '连接测试'}超时（${Math.round(timeoutMs / 1000)} 秒）`)), timeoutMs);
   let firstTokenMs;
   let reply = '';
   let reasoning = '';
@@ -101,7 +129,7 @@ export async function probeModel(llm, input, signal) {
     const stream = llm.stream({
       provider,
       model,
-      messages: [{ role: 'user', content: [{ type: 'text', text: PROMPT }] }],
+      messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
       maxTokens,
       signal: controller.signal,
     });
@@ -130,12 +158,24 @@ export async function probeModel(llm, input, signal) {
         mode: 'stream', code: 'INCOMPLETE_STREAM', message: `流未正常结束（${finishKind || '无 finish'}）`, reply: reply.slice(0, 1000), usage,
       };
     }
-    return {
-      ok: true, provider, model, startedAt, elapsedMs: Math.round(performance.now() - started), firstTokenMs,
-      mode: 'stream', reply: reply.trim().slice(0, 1000), reasoning: reasoning.trim().slice(0, 1000), usage,
-      exactReply: reply.trim().toUpperCase() === 'OK',
-      request: { provider, model, messages: [{ role: 'user', content: [{ type: 'text', text: PROMPT }] }], maxTokens, stream: true },
+    const result = {
+      ok: true, type, provider, model, startedAt, elapsedMs: Math.round(performance.now() - started), firstTokenMs,
+      mode: 'stream', reply: reply.trim().slice(0, isSvg ? 4000 : 1000), reasoning: reasoning.trim().slice(0, 1000), usage,
+      exactReply: isSvg ? undefined : reply.trim().toUpperCase() === 'OK',
+      request: { provider, model, messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }], maxTokens, stream: true },
     };
+    if (isSvg) {
+      try {
+        const { svg, bytes } = sanitizeSvg(reply);
+        result.svg = svg;
+        result.svgBytes = bytes;
+      } catch (error) {
+        result.ok = false;
+        result.code = 'INVALID_SVG';
+        result.message = redact(textOf(error));
+      }
+    }
+    return result;
   } catch (error) {
     return {
       ok: false, provider, model, startedAt, elapsedMs: Math.round(performance.now() - started), firstTokenMs,
@@ -190,8 +230,7 @@ export function apply(ctx) {
       ctx.webServer.register(route(`${API}/test`, async (req, res) => {
         const body = await readJson(req);
         const runId = typeof body.runId === 'string' ? body.runId.slice(0, 100) : '';
-        const controller = new AbortController();
-        if (runId) beginRun(runId);
+        const controller = runId ? beginRun(runId) : new AbortController();
         try {
           const result = await probeModel(ctx.llm, body, controller.signal);
           writeJson(res, 200, result);

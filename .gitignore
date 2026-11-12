@@ -3,6 +3,8 @@ node_modules/
 test/.edge-profile/
 test/vendor/
 test/ui-result.png
+test/svg-ui-result.png
+test/svg-real-result.json
 .link-plugin.cjs
 package.profile.before-install.json
 *.log
