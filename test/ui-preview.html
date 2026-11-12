@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>模型测速 · 界面验收</title><style>html,body,#app{margin:0;height:100%;background:#161616;font-family:system-ui,"Microsoft YaHei",sans-serif}</style></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>模型综合检测 · 界面验收</title><style>html,body,#app{margin:0;height:100%;background:#161616;font-family:system-ui,"Microsoft YaHei",sans-serif}</style></head>
 <body><div id="app"></div>
 <script>
 (async () => {
@@ -36,7 +36,8 @@
       plugin.apply(ctx);
       const Launcher = slots.get('dsh-model-probe');
       ReactDOM.createRoot(document.getElementById('app')).render(React.createElement(Launcher, { wide: true }));
-      requestAnimationFrame(() => document.querySelector('.dmp-launcher').click());
+      const openPanel = () => { const button = document.querySelector('.dmp-launcher'); if (button) button.click(); else setTimeout(openPanel, 50); };
+      setTimeout(openPanel, 50);
     },
   };
   (0, eval)(await (await originalFetch('/client.js')).text());

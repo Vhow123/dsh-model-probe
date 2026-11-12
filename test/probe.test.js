@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { probeModel, readCatalog, sanitizeSvg } from '../index.js';
+import { probeModel, readCatalog, sanitizeSvg, fingerprintModel, FINGERPRINT_PROBES } from '../index.js';
 
 function llmWith(stream) {
   return { stream };
@@ -139,6 +139,100 @@ test('SVG probe rejects replies without a complete SVG', async () => {
 test('SVG sanitizer enforces the 32 KiB output limit', () => {
   const source = `<svg><desc>${'x'.repeat(33000)}</desc></svg>`;
   assert.throws(() => sanitizeSvg(source), /32 KiB/);
+});
+
+test('custom SVG probe adds an SVG output contract to a short Chinese prompt', async () => {
+  const prompt = '三英战吕布';
+  const result = await probeModel(llmWith(async function* (options) {
+    assert.match(options.messages[0].content[0].text, /under 3,000 bytes and at most 24 elements/);
+    assert.equal(options.maxTokens, 4096);
+    assert.match(options.messages[0].content[0].text, /User request:\n三英战吕布$/);
+    yield { type: 'text-delta', text: '<svg viewBox="0 0 10 10"><path d="M1 9 5 1 9 9Z" fill="red"/></svg>' };
+    yield { type: 'finish', reason: { kind: 'stop' } };
+  }), { provider: 'one', model: 'model-a', type: 'custom-svg', prompt });
+  assert.equal(result.ok, true);
+  assert.equal(result.type, 'custom-svg');
+  assert.equal(result.quick, true);
+  assert.equal(result.elementCount, 2);
+  assert.equal(result.animationCount, 0);
+  assert.match(result.request.messages[0].content[0].text, /三英战吕布$/);
+  assert.match(result.svg, /fill="red"/);
+});
+
+test('custom SVG probe preserves requested animation', async () => {
+  const result = await probeModel(llmWith(async function* () {
+    yield { type: 'text-delta', text: '<svg><circle r="4"><animate attributeName="r" values="4;8;4" dur="2s" repeatCount="indefinite"/></circle></svg>' };
+    yield { type: 'finish', reason: { kind: 'stop' } };
+  }), { provider: 'one', model: 'model-a', type: 'custom-svg', prompt: 'Draw a pulsing circle as SVG.' });
+  assert.equal(result.ok, true);
+  assert.equal(result.animationCount, 1);
+});
+
+test('custom SVG quick mode rejects oversized and over-element results', async () => {
+  const run = (svg) => probeModel(llmWith(async function* () {
+    yield { type: 'text-delta', text: svg };
+    yield { type: 'finish', reason: { kind: 'stop' } };
+  }), { provider: 'one', model: 'model-a', type: 'custom-svg', prompt: 'simple icon' });
+  const oversized = await run(`<svg><desc>${'x'.repeat(3000)}</desc></svg>`);
+  assert.equal(oversized.ok, false);
+  assert.equal(oversized.code, 'SVG_LIMIT_EXCEEDED');
+  assert.match(oversized.message, /3000 字节/);
+  const excessive = await run(`<svg>${'<circle r="1"/>'.repeat(30)}</svg>`);
+  assert.equal(excessive.ok, false);
+  assert.equal(excessive.code, 'SVG_LIMIT_EXCEEDED');
+  assert.match(excessive.message, /30 个元素/);
+});
+
+test('custom SVG standard mode opts out of quick limits', async () => {
+  const result = await probeModel(llmWith(async function* (options) {
+    assert.match(options.messages[0].content[0].text, /under 12,000 bytes and 100 elements/);
+    yield { type: 'text-delta', text: `<svg><desc>${'x'.repeat(3100)}</desc></svg>` };
+    yield { type: 'finish', reason: { kind: 'stop' } };
+  }), { provider: 'one', model: 'model-a', type: 'custom-svg', prompt: 'detailed icon', quick: false });
+  assert.equal(result.ok, true);
+  assert.equal(result.quick, false);
+  assert.ok(result.svgBytes > 3000);
+});
+
+test('custom SVG prompt must be present and bounded', async () => {
+  await assert.rejects(() => probeModel(llmWith(async function* () {}), { provider: 'one', model: 'model-a', type: 'custom-svg', prompt: '  ' }), /提示词不能为空/);
+  await assert.rejects(() => probeModel(llmWith(async function* () {}), { provider: 'one', model: 'model-a', type: 'custom-svg', prompt: 'x'.repeat(4001) }), /4000/);
+});
+
+test('fingerprint probe combines deterministic behavior checks and a stable digest', async () => {
+  const answers = { identity: 'model-a', exact: 'DSH_FP_OK', reasoning: '657', json: '{"alpha":17,"beta":["x","y"]}', noise: 'N7Q9-X2M4', code: 'function square(n) { return n * n; }', language: '模型指纹测试通过' };
+  const llm = llmWith(async function* (options) {
+    const probe = FINGERPRINT_PROBES.find((item) => item.prompt === options.messages[0].content[0].text);
+    assert.ok(probe);
+    yield { type: 'text-delta', text: answers[probe.id] };
+    yield { type: 'usage', usage: { outputTokens: 8 } };
+    yield { type: 'finish', reason: { kind: 'stop' } };
+  });
+  const result = await fingerprintModel(llm, { provider: 'one', model: 'model-a' });
+  assert.equal(result.ok, true);
+  assert.equal(result.score, 100);
+  assert.equal(result.confidence, 100);
+  assert.equal(result.completed, 7);
+  assert.equal(result.reportedModel, 'model-a');
+  assert.equal(result.claimedModelHintMatch, true);
+  assert.match(result.fingerprint, /^[a-f0-9]{64}$/);
+  assert.equal(result.fingerprint, (await fingerprintModel(llm, { provider: 'one', model: 'model-a' })).fingerprint);
+});
+
+test('fingerprint probe retains partial evidence when one behavioral probe fails', async () => {
+  const llm = llmWith(async function* (options) {
+    const prompt = options.messages[0].content[0].text;
+    if (prompt.includes('Calculate')) { yield { type: 'finish', reason: { kind: 'error', failure: { code: 'UPSTREAM', message: 'failure' } } }; return; }
+    const answer = prompt.includes('exact model') ? 'unknown' : prompt.includes('DSH_FP_OK') ? 'DSH_FP_OK' : prompt.includes('JSON object') ? '{"alpha":17,"beta":["x","y"]}' : prompt.includes('N7Q9-X2M4') ? 'N7Q9-X2M4' : prompt.includes('JavaScript') ? 'function square(n){return n*n}' : '模型指纹测试通过';
+    yield { type: 'text-delta', text: answer };
+    yield { type: 'finish', reason: { kind: 'stop' } };
+  });
+  const result = await fingerprintModel(llm, { provider: 'one', model: 'model-a' });
+  assert.equal(result.ok, true);
+  assert.equal(result.partial, true);
+  assert.equal(result.completed, 6);
+  assert.equal(result.score, Math.round(500 / 6));
+  assert.equal(result.features.checks.reasoning, false);
 });
 
 test('inputs reject missing routes', async () => {

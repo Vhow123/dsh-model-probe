@@ -5,6 +5,16 @@ test/vendor/
 test/ui-result.png
 test/svg-ui-result.png
 test/svg-real-result.json
+test/apimaster.html
+test/apimaster-js/
+test/apimaster-scripts.txt
+test/*-result.json
+test/*-real.json
+test/custom-short-request.mjs
+test/quick-payload.json
+test/catalog-current.json
+test/custom-svg-ui-result.png
+test/fingerprint-ui-result.png
 .link-plugin.cjs
 package.profile.before-install.json
 *.log
