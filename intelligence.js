@@ -2,8 +2,9 @@ import { performance } from 'node:perf_hooks';
 
 const COMPLETED = new Set(['stop', 'tool-calls', 'max-tokens']);
 
-// A small, deterministic local benchmark inspired by the public report shape of
-// tk1688. It is not a copy of their private question bank or a population IQ test.
+// A small, deterministic local benchmark. It reuses the field naming common to
+// public probe reports, but ships its own questions and is not a population IQ
+// test or a cross-model ranking.
 export const INTELLIGENCE_PROBES = [
   { id: 'candy-canary', dim: 'logic', weight: 1, maxTokens: 256, prompt: '小明有 3 颗糖，吃掉 1 颗后又放入 2 颗。现在有几颗糖？只输出数字。', expected: '4' },
   { id: 'logic-chain', dim: 'logic', weight: 2, maxTokens: 384, prompt: '所有甲都是乙，所有乙都是丙。已知甲存在，能否确定甲是丙？只输出“是”或“否”。', expected: '是' },
@@ -171,7 +172,7 @@ function makeDetail(probes, items, elapsedMs, startedAt, provider, model, aborte
     reasoning_tokens: totalTokens, reasoning_chars: totalReasoningChars, completed, partial: completed < probes.length, passed,
     protocol: 'dsh.llm.stream', latency_ms: elapsedMs, latencyMs,
     summary: `智力值 ${score}/100 · ${correct}/${probes.length} 题 · 加权 ${weightedGot}/${weightedMax}`,
-    note: '本地18题加权基准；参考公开报告结构，不等同智商、tk1688私有题库或同模型排名。',
+    note: '本地18题加权基准；参考公开报告结构，不等同智商或同模型排名。',
     startedAt, provider, model, aborted,
   };
 }

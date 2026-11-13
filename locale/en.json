@@ -83,7 +83,7 @@
   "intelligenceWeighted": "Weighted score",
   "intelligenceProbes": "Question details",
   "intelligencePartial": "Some questions failed; the score uses completed items only",
-  "intelligenceHint": "Local 18-item weighted benchmark; mirrors a public report shape, not an IQ test, tk1688’s private bank, or a cross-model ranking",
+  "intelligenceHint": "Local 18-item weighted benchmark; mirrors a public report shape, not an IQ test or a cross-model ranking",
   "tierFlagship": "Flagship",
   "tierMid": "Mid-range",
   "tierSmall": "Lightweight",
