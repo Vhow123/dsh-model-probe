@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Model Probe",
-    "description": "Test model connectivity, behavioral fingerprints, latency, token usage, and SVG generation."
+    "description": "Test model connectivity, behavioral fingerprints, local intelligence benchmarks, latency, token usage, and SVG generation."
   },
   "title": "Model Probe",
   "subtitle": "Check live connectivity, behavioral fingerprints, and animated or custom SVG generation",
@@ -72,5 +72,27 @@
   "loadError": "Failed to load model catalog",
   "catalogError": "Catalog error",
   "select": "Select",
-  "footnote": "Uses current DSH model routes. Keys stay on the Host and never reach this page."
+  "footnote": "Uses current DSH model routes. Keys stay on the Host and never reach this page.",
+  "intelligence": "Intelligence test",
+  "intelligenceTest": "Run the local intelligence battery",
+  "intelligenceRunning": "Running the local intelligence battery",
+  "intelligenceStop": "Stop intelligence test",
+  "intelligenceScore": "IQ score",
+  "intelligenceTier": "Tier",
+  "intelligenceCanary": "Canary item",
+  "intelligenceWeighted": "Weighted score",
+  "intelligenceProbes": "Question details",
+  "intelligencePartial": "Some questions failed; the score uses completed items only",
+  "intelligenceHint": "Local 18-item weighted benchmark; mirrors a public report shape, not an IQ test, tk1688’s private bank, or a cross-model ranking",
+  "tierFlagship": "Flagship",
+  "tierMid": "Mid-range",
+  "tierSmall": "Lightweight",
+  "tierAbnormal": "Abnormal",
+  "tierInsufficient": "Insufficient sample",
+  "passed": "passed",
+  "notPassed": "failed",
+  "reasoningTokens": "Reasoning tokens",
+  "reasoningNotReported": "not reported",
+  "reasoningChars": "Reasoning text",
+  "reasoningCharsUnit": "chars"
 }

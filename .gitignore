@@ -23,3 +23,5 @@ package.profile.before-install.json
 *.bak-*
 test/debug-react.mjs
 .DS_Store
+test/intelligence-ui-result.png
+test/iq-*.json

@@ -1,5 +1,8 @@
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
+import { intelligenceModel, INTELLIGENCE_PROBES, checkIntelligenceAnswer } from './intelligence.js';
+
+export { intelligenceModel, INTELLIGENCE_PROBES, checkIntelligenceAnswer };
 
 export const name = 'dsh-model-probe';
 export const inject = ['webServer', 'llm'];
@@ -401,6 +404,17 @@ export function apply(ctx) {
         const controller = runId ? beginRun(runId) : new AbortController();
         try {
           const result = await fingerprintModel(ctx.llm, body, controller.signal);
+          writeJson(res, 200, result);
+        } finally {
+          if (runId && activeTests.get(runId) === controller) activeTests.delete(runId);
+        }
+      })),
+      ctx.webServer.register(route(`${API}/intelligence`, async (req, res) => {
+        const body = await readJson(req);
+        const runId = typeof body.runId === 'string' ? body.runId.slice(0, 100) : '';
+        const controller = runId ? beginRun(runId) : new AbortController();
+        try {
+          const result = await intelligenceModel(ctx.llm, body, controller.signal);
           writeJson(res, 200, result);
         } finally {
           if (runId && activeTests.get(runId) === controller) activeTests.delete(runId);
