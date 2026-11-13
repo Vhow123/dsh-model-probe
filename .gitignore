@@ -26,3 +26,5 @@ test/debug-react.mjs
 test/intelligence-ui-result.png
 test/html-ui-result.png
 test/iq-*.json
+test/fingerprint-ui-detail.png
+test/fingerprint-ui-full.png

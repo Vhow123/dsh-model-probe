@@ -208,7 +208,7 @@ test('fingerprint probe combines deterministic behavior checks and a stable dige
     yield { type: 'usage', usage: { outputTokens: 8 } };
     yield { type: 'finish', reason: { kind: 'stop' } };
   });
-  const result = await fingerprintModel(llm, { provider: 'one', model: 'model-a' });
+  const result = await fingerprintModel(llm, { mode: 'full', provider: 'one', model: 'model-a' });
   assert.equal(result.ok, true);
   assert.equal(result.score, 100);
   assert.equal(result.confidence, 100);
@@ -216,7 +216,7 @@ test('fingerprint probe combines deterministic behavior checks and a stable dige
   assert.equal(result.reportedModel, 'model-a');
   assert.equal(result.claimedModelHintMatch, true);
   assert.match(result.fingerprint, /^[a-f0-9]{64}$/);
-  assert.equal(result.fingerprint, (await fingerprintModel(llm, { provider: 'one', model: 'model-a' })).fingerprint);
+  assert.equal(result.fingerprint, (await fingerprintModel(llm, { mode: 'full', provider: 'one', model: 'model-a' })).fingerprint);
 });
 
 test('fingerprint probe retains partial evidence when one behavioral probe fails', async () => {
@@ -227,7 +227,7 @@ test('fingerprint probe retains partial evidence when one behavioral probe fails
     yield { type: 'text-delta', text: answer };
     yield { type: 'finish', reason: { kind: 'stop' } };
   });
-  const result = await fingerprintModel(llm, { provider: 'one', model: 'model-a' });
+  const result = await fingerprintModel(llm, { mode: 'full', provider: 'one', model: 'model-a' });
   assert.equal(result.ok, true);
   assert.equal(result.partial, true);
   assert.equal(result.completed, 6);

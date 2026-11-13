@@ -1,8 +1,8 @@
 {
   "name": "@local/dsh-model-probe",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "type": "module",
-  "description": "Test DSH model connectivity, behavioral fingerprints, local intelligence benchmarks, latency, token usage, and sanitized SVG generation.",
+  "description": "Test DSH model connectivity, behavioral fingerprints, drift-aware sampling signatures, local intelligence benchmarks, latency, token usage, and sanitized SVG and HTML generation.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -30,11 +30,13 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check index.js && node --check client.js && node --check intelligence.js"
+    "check": "node --check index.js && node --check client.js && node --check intelligence.js && node --check fingerprint.js && node --check tokenizers.js"
   },
   "files": [
     "index.js",
     "intelligence.js",
+    "fingerprint.js",
+    "tokenizers.js",
     "client.js",
     "locale",
     "icon.svg",

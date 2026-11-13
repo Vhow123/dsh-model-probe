@@ -1,8 +1,11 @@
 import { performance } from 'node:perf_hooks';
-import { createHash } from 'node:crypto';
 import { intelligenceModel, INTELLIGENCE_PROBES, checkIntelligenceAnswer } from './intelligence.js';
+import { fingerprintModel, BEHAVIOR_PROBES, FINGERPRINT_PROBES, DETERMINISTIC_PROBES, TOKENIZER_PROBES, behaviorCheck, buildSignature, compareSignature, mergeBaseline, jsd, bootstrapNoise, parseNumbers, histogramOf, driftThreshold, memoryStore, fileStore, baselinePath, distributionPrompt } from './fingerprint.js';
+import { TOKENIZER_REFERENCE, TOKENIZER_IDS, TOKENIZER_VERSION, matchTokenizers, tokenizerVerdict, advertisedFamily } from './tokenizers.js';
 
 export { intelligenceModel, INTELLIGENCE_PROBES, checkIntelligenceAnswer };
+export { fingerprintModel, BEHAVIOR_PROBES, FINGERPRINT_PROBES, DETERMINISTIC_PROBES, TOKENIZER_PROBES, behaviorCheck, buildSignature, compareSignature, mergeBaseline, jsd, bootstrapNoise, parseNumbers, histogramOf, driftThreshold, memoryStore, fileStore, baselinePath, distributionPrompt };
+export { TOKENIZER_REFERENCE, TOKENIZER_IDS, TOKENIZER_VERSION, matchTokenizers, tokenizerVerdict, advertisedFamily };
 
 export const name = 'dsh-model-probe';
 export const inject = ['webServer', 'llm'];
@@ -570,133 +573,6 @@ export async function probeModel(llm, input, signal) {
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', abort);
-  }
-}
-
-export const FINGERPRINT_PROBES = [
-  { id: 'identity', prompt: 'What exact model are you currently running as? Reply with the model identifier only, without explanation.', maxTokens: 512 },
-  { id: 'exact', prompt: 'Reply with exactly DSH_FP_OK and nothing else.', maxTokens: 64 },
-  { id: 'reasoning', prompt: 'Calculate 37 * 19 - 46. Reply with the number only.', maxTokens: 128 },
-  { id: 'json', prompt: 'Return only this JSON object with no Markdown: {"alpha":17,"beta":["x","y"]}', maxTokens: 128 },
-  { id: 'noise', prompt: 'Noise prefix: ## random / ignored. Repeat exactly this token and nothing else: N7Q9-X2M4', maxTokens: 96 },
-  { id: 'code', prompt: 'Write one JavaScript function named square that returns n * n. Reply with code only.', maxTokens: 384 },
-  { id: 'language', prompt: '用中文回答，只输出：模型指纹测试通过', maxTokens: 128 },
-];
-
-function plainAnswer(text) {
-  return String(text || '').trim().replace(/^```(?:json|javascript|js|text)?\s*/i, '').replace(/\s*```$/, '').trim();
-}
-
-function fingerprintCheck(id, reply) {
-  const answer = plainAnswer(reply);
-  if (id === 'exact') return answer === 'DSH_FP_OK';
-  if (id === 'reasoning') return /^(?:657|657\.0)$/.test(answer);
-  if (id === 'noise') return answer === 'N7Q9-X2M4';
-  if (id === 'language') return answer === '模型指纹测试通过';
-  if (id === 'code') return /function\s+square\s*\(/.test(answer) && /n\s*\*\s*n/.test(answer);
-  if (id === 'json') {
-    try { const value = JSON.parse(answer); return value.alpha === 17 && JSON.stringify(value.beta) === '["x","y"]'; } catch { return false; }
-  }
-  return answer.length > 0;
-}
-
-async function collectFingerprintSample(llm, route, probe, signal, timeoutMs) {
-  const started = performance.now();
-  const controller = new AbortController();
-  const abort = () => controller.abort(signal.reason || new Error('测试已停止'));
-  if (signal.aborted) abort(); else signal.addEventListener('abort', abort, { once: true });
-  const timer = setTimeout(() => controller.abort(new Error('单次指纹探针超时')), timeoutMs);
-  let reply = '';
-  let reasoning = '';
-  let firstTokenMs;
-  let usage;
-  let finishKind;
-  let failure;
-  try {
-    const stream = llm.stream({ ...route, messages: [{ role: 'user', content: [{ type: 'text', text: probe.prompt }] }], maxTokens: probe.maxTokens, signal: controller.signal });
-    for await (const chunk of stream) {
-      if (firstTokenMs === undefined && ((chunk.type === 'text-delta' || chunk.type === 'reasoning-delta') && chunk.text)) firstTokenMs = Math.round(performance.now() - started);
-      if (chunk.type === 'text-delta') reply += chunk.text;
-      if (chunk.type === 'reasoning-delta') reasoning += chunk.text;
-      if (chunk.type === 'usage') usage = chunk.usage;
-      if (chunk.type === 'finish') {
-        finishKind = chunk.reason?.kind;
-        if (chunk.reason?.kind === 'error' || chunk.reason?.kind === 'aborted') failure = chunk.reason.failure;
-      }
-    }
-    if (failure) throw Object.assign(new Error(failure.message || '模型请求失败'), { code: failure.code });
-    if (!['stop', 'tool-calls', 'max-tokens'].includes(finishKind)) throw new Error(`流未正常结束（${finishKind || '无 finish'}）`);
-    return { id: probe.id, ok: true, passed: fingerprintCheck(probe.id, reply), prompt: probe.prompt, reply: reply.slice(0, 1600), reasoning: reasoning.slice(0, 400), elapsedMs: Math.round(performance.now() - started), firstTokenMs, usage };
-  } finally {
-    clearTimeout(timer);
-    signal.removeEventListener('abort', abort);
-  }
-}
-
-export async function fingerprintModel(llm, input, signal = new AbortController().signal) {
-  const provider = typeof input.provider === 'string' ? input.provider.trim() : '';
-  const model = typeof input.model === 'string' ? input.model.trim() : '';
-  if (!provider || !model) throw new Error('provider 和 model 不能为空');
-  const route = { provider, model };
-  const startedAt = Date.now();
-  const started = performance.now();
-  const totalTimeoutMs = Math.max(60000, Math.min(600000, Number(input.timeoutMs) || 360000));
-  const perProbeTimeoutMs = Math.max(5000, Math.min(90000, Number(input.perProbeTimeoutMs) || 45000));
-  const controller = new AbortController();
-  const abort = () => controller.abort(signal.reason || new Error('测试已停止'));
-  if (signal.aborted) abort(); else signal.addEventListener('abort', abort, { once: true });
-  const timer = setTimeout(() => controller.abort(new Error('模型指纹检测超时')), totalTimeoutMs);
-  const probes = [];
-  try {
-    for (const probe of FINGERPRINT_PROBES) {
-      if (controller.signal.aborted) break;
-      try { probes.push(await collectFingerprintSample(llm, route, probe, controller.signal, perProbeTimeoutMs)); }
-      catch (error) {
-        probes.push({ id: probe.id, ok: false, passed: false, prompt: probe.prompt, code: error?.code || (controller.signal.aborted ? 'ABORTED' : 'PROBE_ERROR'), message: redact(textOf(error)) });
-        if (controller.signal.aborted) break;
-      }
-    }
-    const elapsedMs = Math.round(performance.now() - started);
-    if (controller.signal.aborted) return { ok: false, type: 'fingerprint', provider, model, startedAt, elapsedMs, code: 'ABORTED', message: redact(textOf(controller.signal.reason)), probes };
-    const completed = probes.filter((probe) => probe.ok);
-    if (!completed.length) return { ok: false, type: 'fingerprint', provider, model, startedAt, elapsedMs, code: 'FINGERPRINT_FAILED', message: '所有指纹探针均失败', probes };
-    const behavioral = FINGERPRINT_PROBES.filter((probe) => probe.id !== 'identity');
-    const checks = Object.fromEntries(behavioral.map((probe) => [probe.id, probes.find((item) => item.id === probe.id)?.passed === true]));
-    const passed = Object.values(checks).filter(Boolean).length;
-    const lengths = completed.map((probe) => Buffer.byteLength(plainAnswer(probe.reply), 'utf8'));
-    const latencies = completed.map((probe) => probe.elapsedMs).sort((a, b) => a - b);
-    const firstTokenLatencies = completed.map((probe) => probe.firstTokenMs).filter((value) => Number.isFinite(value));
-    const latencyMs = {
-      mean: Math.round(latencies.reduce((sum, value) => sum + value, 0) / latencies.length),
-      median: latencies[Math.floor(latencies.length / 2)],
-      p95: latencies[Math.max(0, Math.ceil(latencies.length * 0.95) - 1)],
-      min: latencies[0], max: latencies[latencies.length - 1],
-      ttftMean: firstTokenLatencies.length ? Math.round(firstTokenLatencies.reduce((sum, value) => sum + value, 0) / firstTokenLatencies.length) : null,
-    };
-    const features = {
-      checks,
-      completionRate: Number((completed.length / FINGERPRINT_PROBES.length).toFixed(3)),
-      meanAnswerBytes: Math.round(lengths.reduce((sum, value) => sum + value, 0) / lengths.length),
-      medianLatencyMs: latencies[Math.floor(latencies.length / 2)],
-      markdownRate: Number((completed.filter((probe) => /```/.test(probe.reply)).length / completed.length).toFixed(3)),
-      meanOutputTokens: Math.round(completed.reduce((sum, probe) => sum + (Number(probe.usage?.outputTokens) || 0), 0) / completed.length),
-    };
-    const reportedModel = plainAnswer(probes.find((probe) => probe.id === 'identity')?.reply).slice(0, 160);
-    const normalizedClaim = model.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const normalizedReport = reportedModel.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const claimedModelHintMatch = normalizedReport ? normalizedReport.includes(normalizedClaim) || normalizedClaim.includes(normalizedReport) : null;
-    const responseDigest = createHash('sha256').update(probes.map((probe) => `${probe.id}:${plainAnswer(probe.reply)}`).join('\n')).digest('hex');
-    const fingerprint = createHash('sha256').update(JSON.stringify(features)).digest('hex');
-    return {
-      ok: true, type: 'fingerprint', provider, model, startedAt, elapsedMs, fingerprint, responseDigest,
-      score: Math.round(100 * passed / behavioral.length), passed, totalChecks: behavioral.length,
-      confidence: Math.round(100 * completed.length / FINGERPRINT_PROBES.length), completed: completed.length, totalProbes: FINGERPRINT_PROBES.length,
-      partial: completed.length < FINGERPRINT_PROBES.length, reportedModel, claimedModelHintMatch, latencyMs, features, probes,
-      request: { provider, model, probeCount: FINGERPRINT_PROBES.length, probeIds: FINGERPRINT_PROBES.map((probe) => probe.id), stream: true },
-    };
-  } finally {
-    clearTimeout(timer);
-    signal.removeEventListener('abort', abort);
   }
 }
 
