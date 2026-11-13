@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { probeModel, readCatalog, sanitizeSvg, fingerprintModel, FINGERPRINT_PROBES } from '../index.js';
+import { probeModel, readCatalog, sanitizeSvg, sanitizeArtifact, fingerprintModel, FINGERPRINT_PROBES } from '../index.js';
 
 function llmWith(stream) {
   return { stream };
@@ -237,4 +237,135 @@ test('fingerprint probe retains partial evidence when one behavioral probe fails
 
 test('inputs reject missing routes', async () => {
   await assert.rejects(() => probeModel(llmWith(async function* () {}), {}), /provider 和 model 不能为空/);
+});
+
+test('HTML artifact sanitizer keeps inline CSS and animation while dropping active content', () => {
+  const source = `<!doctype html><html><head><style>@import url(https://example.test/a.css); body{background:url("https://example.test/b.png")} .w{fill:#123456;animation:spin 2s infinite} @keyframes spin{to{transform:rotate(360deg)}}</style></head><body><svg viewBox="0 0 10 10" onload="alert(1)"><circle class="w" r="4" style="fill:#ff8800;stroke:#222" fill="url(#g)"/><use href="#g"/><script>alert(1)</script><image href="https://example.test/c.png"/></svg><a href="javascript:alert(1)">x</a></body></html>`;
+  const result = sanitizeArtifact(source);
+  assert.equal(result.html.includes('<script'), false);
+  assert.equal(/onload|javascript:|@import|https:\/\//.test(result.html), false);
+  assert.match(result.html, /style="fill:#ff8800;stroke:#222"/);
+  assert.match(result.html, /@keyframes spin/);
+  assert.match(result.html, /fill="url\(#g\)"/);
+  assert.match(result.html, /href="#g"/);
+  assert.equal(result.cssAnimationCount, 1);
+  assert.equal(result.animationCount, 0);
+  assert.ok(result.colorCount >= 3);
+});
+
+test('HTML artifact sanitizer wraps a bare drawing in a document shell', () => {
+  const result = sanitizeArtifact('```html\n<svg viewBox="0 0 10 10"><rect width="4" height="4"><animate attributeName="x" values="0;1;0" dur="2s" repeatCount="indefinite"/></rect></svg>\n```');
+  assert.match(result.html, /^<!doctype html>/);
+  assert.match(result.html, /<svg viewBox="0 0 10 10">/);
+  assert.equal(result.animationCount, 1);
+  assert.equal(result.cssAnimationCount, 0);
+});
+
+test('HTML artifact sanitizer keeps the whole drawing visible in the preview', () => {
+  const sliced = sanitizeArtifact('<svg viewBox="0 0 100 50" preserveAspectRatio="xMidYMid slice"><rect width="50" height="20"/></svg>');
+  assert.match(sliced.html, /preserveAspectRatio="xMidYMid meet"/);
+  const plain = sanitizeArtifact('<svg viewBox="0 0 100 50"><rect width="50" height="20"/></svg>');
+  assert.doesNotMatch(plain.html, /slice/);
+});
+
+test('HTML artifact sanitizer composes transforms before judging overflow', () => {
+  const shifted = sanitizeArtifact('<svg viewBox="0 0 100 100"><g transform="translate(-50,0)"><circle cx="90" cy="50" r="30"/></g></svg>');
+  assert.equal(shifted.overflowPct, 0);
+  const bare = sanitizeArtifact('<svg viewBox="0 0 100 100"><circle cx="90" cy="50" r="30"/></svg>');
+  assert.equal(bare.overflowPct, 20);
+  const scaled = sanitizeArtifact('<svg viewBox="0 0 100 100"><g transform="translate(50,50) scale(2)"><rect width="40" height="40"/></g></svg>');
+  assert.equal(scaled.overflowPct, 30);
+});
+
+test('HTML artifact sanitizer reports how far the drawing spills outside the viewport', () => {
+  const inside = sanitizeArtifact('<svg viewBox="0 0 100 100"><rect width="80" height="80"/></svg>');
+  assert.equal(inside.overflowPct, 0);
+  const spilling = sanitizeArtifact('<svg viewBox="0 0 100 100"><rect width="150" height="50"/></svg>');
+  assert.equal(spilling.overflowPct, 50);
+  const fromWidthHeight = sanitizeArtifact('<svg width="200" height="200"><circle cx="180" cy="100" r="40"/></svg>');
+  assert.equal(fromWidthHeight.overflowPct, 10);
+  const backdrop = sanitizeArtifact('<svg viewBox="0 0 100 100"><rect x="-50" y="-50" width="200" height="200" fill="url(#sky)"/><circle cx="50" cy="50" r="10"/></svg>');
+  assert.equal(backdrop.overflowPct, 0);
+  const unmeasurable = sanitizeArtifact('<svg><text x="1" y="1">hi</text></svg>');
+  assert.equal(unmeasurable.overflowPct, null);
+  const smooth = sanitizeArtifact('<svg viewBox="0 0 100 100"><path d="M10 50 Q25 20 50 50 T90 50"/></svg>');
+  assert.equal(smooth.overflowPct, 0);
+  const offscreen = sanitizeArtifact('<svg viewBox="0 0 100 100"><rect x="140" width="20" height="10"/><circle cx="50" cy="50" r="5"/></svg>');
+  assert.equal(offscreen.overflowPct, 0);
+  const sky = sanitizeArtifact('<svg viewBox="0 0 100 100"><rect y="-30" width="100" height="130" fill="url(#sky)"/><circle cx="50" cy="50" r="10"/></svg>');
+  assert.equal(sky.overflowPct, 0);
+  const halo = sanitizeArtifact('<svg viewBox="0 0 900 560"><circle cx="744" cy="104" r="160" fill="url(#sunGlow)"/><circle cx="300" cy="300" r="40"/></svg>');
+  assert.equal(halo.overflowPct, 0);
+  const sliver = sanitizeArtifact('<svg viewBox="0 0 100 100"><rect x="140" y="10" width="6" height="4"/><circle cx="50" cy="50" r="10"/></svg>');
+  assert.equal(sliver.overflowPct, 0);
+  const template = sanitizeArtifact('<svg viewBox="0 0 100 100"><defs><g id="wheel"><circle r="60"/></g></defs><use href="#wheel" x="50" y="50"/><circle cx="50" cy="50" r="10"/></svg>');
+  assert.equal(template.overflowPct, 0);
+  const driving = sanitizeArtifact('<svg viewBox="0 0 100 100"><g><animateTransform attributeName="transform" type="translate" values="-300 50;300 50" dur="4s" repeatCount="indefinite"/><circle r="8"/></g><circle cx="50" cy="50" r="10"/></svg>');
+  assert.equal(driving.overflowPct, 0);
+});
+
+test('HTML probe asks for a self-contained document and measures the drawing', async () => {
+  const brief = '画一只骑车的猫';
+  const result = await probeModel(llmWith(async function* (options) {
+    assert.match(options.messages[0].content[0].text, /self-contained HTML document/);
+    assert.match(options.messages[0].content[0].text, /User request:\n画一只骑车的猫$/);
+    assert.equal(options.maxTokens, 65536);
+    yield { type: 'text-delta', text: '<!doctype html><html><head><style>@keyframes roll{to{transform:rotate(360deg)}} .w{animation:roll 2s infinite}</style></head><body><svg viewBox="0 0 10 10"><circle class="w" r="4" fill="#123456"/><circle r="2" fill="#abcdef"/></svg></body></html>' };
+    yield { type: 'finish', reason: { kind: 'stop' } };
+  }), { provider: 'one', model: 'model-a', type: 'svg-html', prompt: brief });
+  assert.equal(result.ok, true);
+  assert.equal(result.type, 'svg-html');
+  assert.equal(result.animated, true);
+  assert.equal(result.cssAnimationCount, 1);
+  assert.equal(result.colorCount, 2);
+  assert.equal(typeof result.overflowPct, 'number');
+  assert.equal(result.external, false);
+  assert.ok(result.htmlBytes > 0);
+  assert.match(result.html, /@keyframes roll/);
+  assert.equal(result.request.maxTokens, 65536);
+});
+
+test('HTML probe marks a static default drawing as not meeting the animated brief', async () => {
+  const result = await probeModel(llmWith(async function* (options) {
+    assert.match(options.messages[0].content[0].text, /鹈鹕/);
+    yield { type: 'text-delta', text: '<svg viewBox="0 0 10 10"><circle r="4" fill="#123456"/></svg>' };
+    yield { type: 'finish', reason: { kind: 'stop' } };
+  }), { provider: 'one', model: 'model-a', type: 'svg-html' });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'STATIC_DRAWING');
+  assert.equal(result.animated, false);
+});
+
+test('HTML probe accepts a static drawing when the user supplied the brief', async () => {
+  const result = await probeModel(llmWith(async function* () {
+    yield { type: 'text-delta', text: '<svg viewBox="0 0 10 10"><circle r="4" fill="#123456"/></svg>' };
+    yield { type: 'finish', reason: { kind: 'stop' } };
+  }), { provider: 'one', model: 'model-a', type: 'svg-html', prompt: '静态图标' });
+  assert.equal(result.ok, true);
+  assert.equal(result.animated, false);
+});
+
+test('drawing probes report a token budget spent on reasoning', async () => {
+  const result = await probeModel(llmWith(async function* () {
+    yield { type: 'reasoning-delta', text: 'planning coordinates' };
+    yield { type: 'finish', reason: { kind: 'max-tokens' } };
+  }), { provider: 'one', model: 'model-a', type: 'svg-html' });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'OUTPUT_TRUNCATED');
+  assert.match(result.message, /max-tokens/);
+});
+
+test('HTML probe rejects replies without SVG and oversized documents', async () => {
+  const run = (text) => probeModel(llmWith(async function* () {
+    yield { type: 'text-delta', text };
+    yield { type: 'finish', reason: { kind: 'stop' } };
+  }), { provider: 'one', model: 'model-a', type: 'svg-html', prompt: 'x' });
+  const missing = await run('I cannot draw that.');
+  assert.equal(missing.ok, false);
+  assert.equal(missing.code, 'INVALID_ARTIFACT');
+  assert.match(missing.message, /没有 SVG/);
+  const oversized = await run(`<svg><desc>${'x'.repeat(65000)}</desc></svg>`);
+  assert.equal(oversized.ok, false);
+  assert.equal(oversized.code, 'ARTIFACT_LIMIT_EXCEEDED');
+  assert.match(oversized.message, /64000 字节/);
 });
