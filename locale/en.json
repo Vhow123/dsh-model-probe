@@ -4,7 +4,7 @@
     "description": "Test model connectivity, behavioral fingerprints, local intelligence benchmarks, latency, token usage, and SVG generation."
   },
   "title": "Model Probe",
-  "subtitle": "Check live connectivity, behavioral fingerprints, and animated or custom SVG generation",
+  "subtitle": "Check live connectivity, behavioral fingerprints, an 18-item intelligence battery, and animated or custom SVG generation",
   "testType": "Test type",
   "connectionTest": "Connectivity",
   "svgTest": "Animated SVG probe",

@@ -4,7 +4,7 @@
     "description": "测试模型连接、行为指纹、智力基准、耗时、Token 用量和 SVG 绘图能力。"
   },
   "title": "模型综合检测",
-  "subtitle": "检查模型实时连接、行为指纹及动态或自定义 SVG 绘图能力",
+  "subtitle": "检查模型实时连接、行为指纹、18 题智力基准及动态或自定义 SVG 绘图能力",
   "testType": "测试类型",
   "connectionTest": "连接检测",
   "svgTest": "SVG 动画检测",

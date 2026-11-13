@@ -51,11 +51,13 @@ const initial = await evaluate(`({
   label: document.querySelector('.dmp-intel-btn')?.textContent,
   title: document.querySelector('.dmp-intel-btn')?.title,
   aria: document.querySelector('.dmp-intel-btn')?.getAttribute('aria-label'),
+  subtitle: document.querySelector('.dmp-subtitle')?.textContent,
   error: document.querySelector('.dmp-error')?.textContent,
   lastError: document.body.dataset.lastError,
 })`);
 if (initial.models < 1 || initial.models !== initial.iqButtons || initial.error) throw new Error(JSON.stringify({ initial, errors }));
 if (initial.label !== 'IQ') throw new Error('IQ 按钮文案异常: ' + initial.label);
+if (!/智力基准/.test(initial.subtitle || '')) throw new Error('面板副标题没有提到智力基准: ' + initial.subtitle);
 
 // 选中 deepseek-flash（真实可用 provider），点 IQ
 const picked = await evaluate(`(() => {
