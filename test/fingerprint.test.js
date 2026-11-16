@@ -547,6 +547,20 @@ test('the tokenizer vector survives a route that moves its baseline between host
   assert.equal(result.tokenizer.probes.every((probe) => probe.ok), true);
 });
 
+test('a forged usage counter is named instead of reported as missing counts', async () => {
+  // a6api/glm-5.3-flash reported 20 input tokens for one character and 3 for a
+  // 201-byte English paragraph, repeating that pair, so the number has nothing to
+  // do with length. Subtracting it is the whole measurement, so the endpoint
+  // cannot be fingerprinted at all — and the reason matters, because "not enough
+  // counts" invites a pointless retry.
+  const counter = (prompt) => (prompt === 'a' ? 20 : 3);
+  const result = await fingerprintModel(llmWith(sampleStream({ tokenizer: counter })), { provider: 'a6api', model: 'glm-5.3-flash' });
+  assert.deepEqual(result.tokenizer.values, [null, null, null, null]);
+  assert.equal(result.tokenizer.verdict, 'insufficient');
+  assert.equal(result.tokenizer.reason, 'usage-untrusted');
+  assert.equal(result.tokenizer.probes.every((probe) => probe.code === 'USAGE_NOT_TRUSTWORTHY'), true);
+});
+
 test('a route that never repeats a pair is reported instead of guessed', async () => {
   let calls = 0;
   const counter = (prompt) => {

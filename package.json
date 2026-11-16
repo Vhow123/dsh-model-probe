@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-model-probe",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "type": "module",
   "description": "Test DSH model connectivity, behavioral fingerprints, drift-aware sampling signatures, local intelligence benchmarks, latency, token usage, and sanitized SVG and HTML generation.",
   "license": "MIT",

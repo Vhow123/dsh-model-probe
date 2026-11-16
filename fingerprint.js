@@ -558,11 +558,25 @@ async function collectTokenizer(llm, route, probe, signal, timeoutMs) {
     };
   }
   const value = pair.diff;
-  if (value < 0 || value > bytes) {
+  // A relay that invents its usage numbers does not count the text at all: the
+  // number it reports has nothing to do with length. Measured on
+  // a6api/glm-5.3-flash, one character came back as 20 input tokens while a
+  // 201-byte English paragraph came back as 3, and the pair repeated that way,
+  // so this is the endpoint and not a routing race. Nothing can be measured
+  // here, and "not enough counts" would read as a transient failure worth
+  // retrying — name the actual cause instead.
+  if (value <= 0 && bytes > 24) {
+    return {
+      id: probe.id, ok: false, value: null, raw: pair.body, baseline: pair.base, stable: false,
+      code: 'USAGE_NOT_TRUSTWORTHY',
+      message: `单字符回报 ${pair.base} 个输入 token，${bytes} 字节文本只回报 ${pair.body} 个，该端点的计数与文本长度无关`,
+    };
+  }
+  if (value > bytes) {
     return {
       id: probe.id, ok: false, value: null, raw: pair.body, baseline: pair.base, stable: false,
       code: 'IMPLAUSIBLE_COUNT',
-      message: `差值 ${value} 落在 0–${bytes} 之外，这次计数与基线来自不同后端`,
+      message: `差值 ${value} 超过 ${bytes} 字节文本的上限，这次计数与基线来自不同后端`,
     };
   }
   return { id: probe.id, ok: true, value, raw: pair.body, baseline: pair.base, stable: true, attempts: pair.attempts * 2 };
@@ -904,6 +918,13 @@ export async function fingerprintModel(llm, input, signal = new AbortController(
       version: TOKENIZER_VERSION,
       probes: tokenizers,
     };
+    // A forged counter explains every missing dimension at once, and it is a
+    // stronger statement than "not enough counts": the endpoint is not reporting
+    // what it claims to report. Only overrides a verdict that could not decide
+    // anything — a vector that still matched three dimensions stands.
+    if (tokenizer.verdict !== 'match' && tokenizers.some((probe) => probe.code === 'USAGE_NOT_TRUSTWORTHY')) {
+      tokenizer.reason = 'usage-untrusted';
+    }
 
     // One digest for "which endpoint answered", built from the two signals that
     // actually identify a model: the greedy answers and the tokenizer vector.

@@ -28,3 +28,4 @@ test/html-ui-result.png
 test/iq-*.json
 test/fingerprint-ui-detail.png
 test/fingerprint-ui-full.png
+test/fingerprint-untrusted.png

@@ -166,5 +166,9 @@
   "tokenizerInsufficientHint": "Fewer than three of the four probes returned a usable count, so the vector is incomplete and no family can be decided.",
   "tokenizerUnstableHint": "The reason is routing: the same text counts differently on two calls, so the baseline cannot be subtracted.",
   "identityFluctuating": "answers move between runs",
-  "identityFluctuatingHint": "these probes no longer count toward identity: one answer drifting is an unstable probe, not a swapped model."
+  "identityFluctuatingHint": "these probes no longer count toward identity: one answer drifting is an unstable probe, not a swapped model.",
+  "tokenizerUsageUntrusted": "token counts untrusted",
+  "tokenizerUsageUntrustedHint": "The input token count this endpoint reports has nothing to do with length: one character came back as 20, a 201-byte paragraph as 3. The usage is hard-coded, and the tokenizer vector is measured by subtracting those counts, so nothing can be measured here — an endpoint that invents its usage should not be trusted to be the model it advertises.",
+  "identitySame": "answers match",
+  "identityComparedUnit": "compared"
 }

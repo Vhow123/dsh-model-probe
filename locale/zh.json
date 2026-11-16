@@ -166,5 +166,9 @@
   "tokenizerInsufficientHint": "四段探针里有三段以上没拿到可采信的计数，向量不完整，没法判断家族。",
   "tokenizerUnstableHint": "原因在这里：路由在多个后端之间轮换，同一段文本两次计数不同，无法与基线相减。",
   "identityFluctuating": "答案会在运行之间变动",
-  "identityFluctuatingHint": "这类探针不再参与身份判定——单项答案漂移是探针不稳，不是换了模型。"
+  "identityFluctuatingHint": "这类探针不再参与身份判定——单项答案漂移是探针不稳，不是换了模型。",
+  "tokenizerUsageUntrusted": "token 计数不可信",
+  "tokenizerUsageUntrustedHint": "该端点回报的输入 token 数与文本长度无关：单字符报 20 个，201 字节的正文只报 3 个。usage 是写死的，而分词器指纹靠这个计数相减，所以这里测不出来；一个连计数都伪造的端点，本身就不该按它宣称的模型对待。",
+  "identitySame": "答案相同",
+  "identityComparedUnit": "项可比"
 }
