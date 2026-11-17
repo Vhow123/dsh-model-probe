@@ -96,3 +96,14 @@ if (/答案会在运行之间变动/.test(details.fingerprint || '') && !/不是
   console.error('抖动探针没有说明它不参与身份判定');
   process.exitCode = 1;
 }
+// The refusal probes are the one channel that does not read usage, so the panel
+// has to show what came back: a digest, a stated output cap, or an explicit
+// "accepted" when the gateway clamped the value before any validator saw it.
+if (!/错误文案/.test(details.fingerprint || '')) {
+  console.error('详情面板没有错误文案探针');
+  process.exitCode = 1;
+}
+if (!/停止词表/.test(details.fingerprint || '')) {
+  console.error('详情面板没有 stop 词表');
+  process.exitCode = 1;
+}

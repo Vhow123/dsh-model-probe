@@ -137,7 +137,7 @@
   "identityPeers": "Same signature as",
   "identityAlone": "No matching signature",
   "identityFirstSeen": "first record, nothing to compare yet",
-  "identityPeerWarn": "These rows answer the identity probes byte for byte like this one; they may be the same backend",
+  "identityPeerWarn": "These rows give the same preference answers item for item. A shared backend does that, but so do different vendors — deepseek and glm both answered 42/blue/A/python here — so this only says the answers agree; the tokenizer vector is the real evidence",
   "fingerprintBatch": "Fingerprint all",
   "fingerprintBatchRunning": "Fingerprinting…",
   "identityChanged": "Changed probes",
@@ -170,5 +170,16 @@
   "tokenizerUsageUntrusted": "token counts untrusted",
   "tokenizerUsageUntrustedHint": "The input token count this endpoint reports has nothing to do with length: one character came back as 20, a 201-byte paragraph as 3. The usage is hard-coded, and the tokenizer vector is measured by subtracting those counts, so nothing can be measured here — an endpoint that invents its usage should not be trusted to be the model it advertises.",
   "identitySame": "answers match",
-  "identityComparedUnit": "compared"
+  "identityComparedUnit": "compared",
+  "errorProse": "Refusal prose",
+  "errorProbes": "Refusal and stop probes",
+  "errorDigest": "Prose digest",
+  "errorOutputLimit": "Output cap",
+  "errorTemp2": "Extreme temp",
+  "errorAccepted": "accepted",
+  "errorRefused": "refused",
+  "errorFinish": "Stop vocabulary",
+  "errorProseHint": "The refusal text is the upstream vendor’s own parameter validation: a relay that only forwards requests passes that sentence through unchanged. It never reads usage, so an endpoint that invents its counts can still be caught here.",
+  "errorProseAcceptedHint": "Nothing was refused this time: the endpoint swallowed a value a vendor validator would normally reject, which means the request never reached a strict validator or the gateway rewrote it. That is information too.",
+  "errorNoValidator": "nothing refused"
 }

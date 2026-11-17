@@ -1,10 +1,10 @@
 import { performance } from 'node:perf_hooks';
 import { intelligenceModel, INTELLIGENCE_PROBES, checkIntelligenceAnswer } from './intelligence.js';
-import { fingerprintModel, BEHAVIOR_PROBES, FINGERPRINT_PROBES, DETERMINISTIC_PROBES, TOKENIZER_PROBES, behaviorCheck, buildSignature, compareSignature, mergeBaseline, jsd, bootstrapNoise, parseNumbers, histogramOf, driftThreshold, memoryStore, fileStore, baselinePath, distributionPrompt } from './fingerprint.js';
+import { fingerprintModel, BEHAVIOR_PROBES, FINGERPRINT_PROBES, DETERMINISTIC_PROBES, TOKENIZER_PROBES, ERROR_PROBES, scrubProse, limitFromProse, behaviorCheck, buildSignature, compareSignature, mergeBaseline, jsd, bootstrapNoise, parseNumbers, histogramOf, driftThreshold, memoryStore, fileStore, baselinePath, distributionPrompt } from './fingerprint.js';
 import { TOKENIZER_REFERENCE, TOKENIZER_IDS, TOKENIZER_VERSION, matchTokenizers, tokenizerVerdict, advertisedFamily } from './tokenizers.js';
 
 export { intelligenceModel, INTELLIGENCE_PROBES, checkIntelligenceAnswer };
-export { fingerprintModel, BEHAVIOR_PROBES, FINGERPRINT_PROBES, DETERMINISTIC_PROBES, TOKENIZER_PROBES, behaviorCheck, buildSignature, compareSignature, mergeBaseline, jsd, bootstrapNoise, parseNumbers, histogramOf, driftThreshold, memoryStore, fileStore, baselinePath, distributionPrompt };
+export { fingerprintModel, BEHAVIOR_PROBES, FINGERPRINT_PROBES, DETERMINISTIC_PROBES, TOKENIZER_PROBES, ERROR_PROBES, scrubProse, limitFromProse, behaviorCheck, buildSignature, compareSignature, mergeBaseline, jsd, bootstrapNoise, parseNumbers, histogramOf, driftThreshold, memoryStore, fileStore, baselinePath, distributionPrompt };
 export { TOKENIZER_REFERENCE, TOKENIZER_IDS, TOKENIZER_VERSION, matchTokenizers, tokenizerVerdict, advertisedFamily };
 
 export const name = 'dsh-model-probe';

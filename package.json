@@ -1,8 +1,8 @@
 {
   "name": "@local/dsh-model-probe",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "type": "module",
-  "description": "Test DSH model connectivity, behavioral fingerprints, drift-aware sampling signatures, local intelligence benchmarks, latency, token usage, and sanitized SVG and HTML generation.",
+  "description": "Test DSH model connectivity, behavioral fingerprints, drift-aware sampling signatures, refusal-prose and stop-vocabulary probes, local intelligence benchmarks, latency, token usage, and sanitized SVG and HTML generation.",
   "license": "MIT",
   "repository": {
     "type": "git",

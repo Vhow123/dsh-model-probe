@@ -7,7 +7,7 @@ import {
   behaviorCheck, parseNumbers, histogramOf, entropyOf, jsd, bootstrapNoise,
   driftThreshold, buildSignature, compareSignature, mergeBaseline, memoryStore,
   fingerprintModel, distributionPrompt, BEHAVIOR_PROBES, canonicalAnswer, TOKENIZER_PROBES,
-  fileStore,
+  scrubProse, limitFromProse, fileStore,
 } from '../fingerprint.js';
 
 // Raw prompt-token counts a real endpoint reported for the four pinned strings,
@@ -42,11 +42,15 @@ function llmWith(stream) {
   return { stream };
 }
 
-function sampleStream({ identity = 'model-a', spread = false, code = 'function square(n) { return n * n; }', deterministic = 'canonical', tokenizer = null, letters = null } = {}) {
+function sampleStream({ identity = 'model-a', spread = false, code = 'function square(n) { return n * n; }', deterministic = 'canonical', tokenizer = null, letters = null, prose = null } = {}) {
   // Tokenizer probes read `usage.inputTokens`, so a stand-in has to count each
   // prompt it is handed. Counting per text keeps "the third time this string was
   // sent" available to a test that wants to move one call onto another backend.
   const sends = new Map();
+  // Only the pinned tokenizer texts plus the single-character baseline report a
+  // count. The error and finish probes go out with the same stream, so counting
+  // their prompts here would shift the "calls" sequence those tests rely on.
+  const countsTokens = (prompt) => prompt === 'a' || TOKENIZER_PROBES.some((probe) => probe.text === prompt);
   // A probe that answers consistently inside one run but differently on the next
   // one is the case `letters` covers: with two repeats per run, calls 0-1 belong
   // to the first run, 2-3 to the second, so both calls inside a run agree. The
@@ -55,12 +59,20 @@ function sampleStream({ identity = 'model-a', spread = false, code = 'function s
   return async function* (options) {
     const prompt = options.messages[0].content[0].text;
     let inputTokens;
-    if (tokenizer) {
+    if (tokenizer && countsTokens(prompt)) {
       const seen = sends.get(prompt) || 0;
       sends.set(prompt, seen + 1);
       inputTokens = tokenizer(prompt, seen);
     }
     const usage = (extra) => ({ ...extra, ...(Number.isFinite(inputTokens) ? { inputTokens } : {}) });
+    // A rejected request never produces text: the adapter surfaces it as an error
+    // finish whose message is the vendor's own validation prose. Only the two
+    // error probes ask for something a vendor would refuse, so a test sets
+    // `prose` and those prompts come back rejected while the rest answer normally.
+    if (typeof prose === 'string' && prompt === 'hi') {
+      yield { type: 'finish', reason: { kind: 'error', failure: { message: prose, code: 'ERR_PROBE', status: 400 } } };
+      return;
+    }
     if (prompt.startsWith('Run ')) {
       // A biased model always returns the same narrow band; a healthy one is uniform.
       const values = [];
@@ -645,4 +657,52 @@ test('two concurrent saves keep both baselines instead of overwriting one', asyn
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('a refusal is scrubbed of identifiers before it becomes evidence', () => {
+  // Vendor prose is the point — its wording identifies the validator. Identifiers
+  // are not: they change on every request and would make the digest unstable.
+  const raw = 'Invalid temperature: max is 2. request_id=req_9f8a7b6c5d4e user_1234567890abcdef 1712345678901234 3f2504e0-4f89-11d3-9a0c-0305e82c3301';
+  const prose = scrubProse(raw);
+  assert.ok(prose.includes('Invalid temperature: max is 2.'));
+  assert.ok(!prose.includes('req_9f8a7b6c5d4e'));
+  assert.ok(!prose.includes('1712345678901234'));
+  assert.ok(!prose.includes('3f2504e0-4f89-11d3-9a0c-0305e82c3301'));
+  assert.ok(prose.length <= 600);
+  assert.equal(prose, prose.replace(/\s+/g, ' ').trim());
+});
+
+test('the output cap a vendor states is pulled out of its own prose', () => {
+  assert.equal(limitFromProse('max_tokens must be less than or equal to 8192'), 8192);
+  assert.equal(limitFromProse('This model supports a maximum output of 16384 tokens'), 16384);
+  assert.equal(limitFromProse('Invalid value: 1000000000. The max output tokens is 4096.'), 4096);
+  assert.equal(limitFromProse('unsupported parameter'), null);
+});
+
+test('a refused request is measured instead of treated as a failed probe', async () => {
+  const refusal = 'Invalid temperature: 2.0 is above the maximum of 1. request_id=req_abc123456789';
+  const result = await fingerprintModel(llmWith(sampleStream({ prose: refusal })), { provider: 'tk', model: 'deepseek-v4.1-flash' });
+  const errProbe = result.errorProse.probes.find((probe) => probe.id === 'err-temperature');
+  // The probe succeeded: a rejection is the measurement. What failed is acceptance.
+  assert.equal(errProbe.ok, true);
+  assert.equal(errProbe.accepted, false);
+  assert.ok(errProbe.prose.includes('Invalid temperature'));
+  assert.ok(!errProbe.prose.includes('req_abc123456789'));
+  assert.equal(result.errorProse.acceptsTemperature2, false);
+});
+
+test('an endpoint that swallows an absurd budget is recorded as accepting it', async () => {
+  const result = await fingerprintModel(llmWith(sampleStream()), { provider: 'tk', model: 'deepseek-v4.1-flash' });
+  assert.equal(result.errorProse.acceptsTemperature2, true);
+  assert.equal(result.errorProse.outputLimit, null);
+  assert.ok(result.errorProse.finish, 'the finish vocabulary should come back from a healthy run');
+  assert.ok(result.errorProse.finish.kinds.includes('stop'));
+});
+
+test('refusal prose feeds the fingerprint so two upstreams cannot share it', async () => {
+  const one = await fingerprintModel(llmWith(sampleStream({ prose: 'unsupported temperature value' })), { provider: 'tk', model: 'deepseek-v4.1-flash' });
+  const two = await fingerprintModel(llmWith(sampleStream({ prose: 'invalid request: temperature out of range' })), { provider: 'tk', model: 'deepseek-v4.1-flash' });
+  assert.ok(one.errorProse.digest);
+  assert.notEqual(one.errorProse.digest, two.errorProse.digest);
+  assert.notEqual(one.fingerprint, two.fingerprint);
 });

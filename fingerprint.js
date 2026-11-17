@@ -107,6 +107,51 @@ export const TOKENIZER_PROBES = [
   },
 ];
 
+// Error text is the one signal a relay cannot invent cheaply. Two probes ask for
+// something the endpoint is not allowed to give: a temperature above the lab's
+// ceiling and an output budget far past it. A gateway that forwards the request
+// also forwards the lab's own refusal, worded by the lab; measured on a live
+// relay, `temperature: 2.0` is accepted and passed upstream while a smaller
+// ceiling in the vendor's own words comes back. The refusal of 10^9 output tokens
+// usually names the real limit, and that number differs per vendor.
+//
+// Neither probe reads `usage`, which is why they still work where the tokenizer
+// probes cannot: a fixed usage counter makes subtraction meaningless, but it does
+// not rewrite what the upstream validator says.
+// A value no vendor accepts on purpose. 2.0 is legal at OpenAI and DeepSeek, so
+// it only catches Anthropic-style ceilings; 5.0 is outside every published range
+// and forces a real validator to say something.
+export const ERROR_PROBES = [
+  {
+    id: 'err-temperature',
+    prompt: 'hi',
+    maxTokens: 8,
+    temperature: 5,
+    timeoutMs: 60000,
+  },
+  {
+    id: 'err-maxtokens',
+    prompt: 'hi',
+    maxTokens: 1000000000,
+    timeoutMs: 60000,
+  },
+];
+
+// Identifiers that change on every call but say nothing about the stack. Dropped
+// so two runs of the same endpoint produce the same prose digest.
+const SCRUB_RULES = [
+  [/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '<id>'],
+  [/(["']?(?:request_?id|requestId|user_?id|trace_?id|session_?id)["']?\s*[:=]\s*)["']?[\w.:-]{6,}["']?/gi, '$1<id>'],
+  [/\b(?:req|msg|chatcmpl|gen|resp)[-_][A-Za-z0-9]{8,}\b/g, '<id>'],
+  [/\b\d{13,}\b/g, '<n>'],
+];
+
+export function scrubProse(text) {
+  let out = redact(String(text || '')).slice(0, 600);
+  for (const [pattern, replacement] of SCRUB_RULES) out = out.replace(pattern, replacement);
+  return out.replace(/\s+/g, ' ').trim();
+}
+
 // One-character prompt used to cancel the serving template out of every count.
 const TOKENIZER_BASELINE = 'a';
 
@@ -582,6 +627,117 @@ async function collectTokenizer(llm, route, probe, signal, timeoutMs) {
   return { id: probe.id, ok: true, value, raw: pair.body, baseline: pair.base, stable: true, attempts: pair.attempts * 2 };
 }
 
+// Like streamOnce, but a refusal is the point rather than an error: these probes
+// exist to read what the endpoint says when it says no. Returns the failure
+// instead of throwing so a valid refusal is a successful measurement.
+async function attemptOnce(llm, route, { prompt, maxTokens, signal, timeoutMs, temperature }) {
+  const started = performance.now();
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal.reason || new Error('测试已停止'));
+  if (signal.aborted) abort(); else signal.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(() => controller.abort(new Error('单次探针超时')), timeoutMs);
+  let reply = '';
+  let finishKind;
+  let failure;
+  try {
+    const stream = llm.stream({
+      ...route,
+      messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+      maxTokens,
+      ...(typeof temperature === 'number' ? { temperature } : {}),
+      signal: controller.signal,
+    });
+    for await (const chunk of stream) {
+      if (chunk.type === 'text-delta') reply += chunk.text;
+      if (chunk.type === 'usage') { /* the probes must not depend on usage */ }
+      if (chunk.type === 'finish') {
+        finishKind = chunk.reason?.kind;
+        if (chunk.reason?.kind === 'error' || chunk.reason?.kind === 'aborted') failure = chunk.reason.failure;
+      }
+    }
+    return { ok: true, reply, finishKind, failure, elapsedMs: Math.round(performance.now() - started) };
+  } catch (error) {
+    // A rejected request surfaces here at most adapters. That is a measurement
+    // too: the message is the vendor's own validation prose.
+    return {
+      ok: false,
+      reply,
+      finishKind,
+      failure: { message: textOf(error), code: error?.code, status: error?.status },
+      elapsedMs: Math.round(performance.now() - started),
+    };
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', abort);
+  }
+}
+
+// The number a vendor states when refusing an absurd output budget is its own
+// cap, and it differs per model family. Pulled out so it can be shown as a
+// figure rather than buried in prose. The gap allowance is generous because
+// vendors phrase the sentence around the number quite differently
+// ("must be less than or equal to 8192" is 29 characters of filler).
+export function limitFromProse(prose) {
+  const match = String(prose).match(/(?:max(?:imum)?[\s_-]*tokens?|max_tokens|output)[^\d]{0,40}(\d{2,9})/i)
+    || String(prose).match(/\b(\d{2,9})\s*(?:tokens?|is the max)/i);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+async function collectError(llm, route, probe, signal, timeoutMs) {
+  const budget = Math.max(timeoutMs, Number(probe.timeoutMs) || 0);
+  const attempt = await attemptOnce(llm, route, {
+    prompt: probe.prompt,
+    maxTokens: probe.maxTokens,
+    temperature: probe.temperature,
+    signal,
+    timeoutMs: budget,
+  });
+  // Accepted: the gateway swallowed a value the lab would normally refuse, which
+  // is itself informative — it means the request never reached a strict validator.
+  if (attempt.ok && !attempt.failure) {
+    return {
+      id: probe.id, ok: true, accepted: true,
+      value: probe.id === 'err-temperature' ? 'accepts 2.0' : 'accepts 10^9',
+      prose: '', code: null, status: null, limit: null,
+      elapsedMs: attempt.elapsedMs,
+    };
+  }
+  const raw = attempt.failure?.message || '';
+  const prose = scrubProse(raw);
+  return {
+    id: probe.id, ok: true, accepted: false,
+    value: prose.slice(0, 200),
+    prose,
+    code: attempt.failure?.code || null,
+    status: Number.isFinite(attempt.failure?.status) ? attempt.failure.status : null,
+    limit: probe.id === 'err-maxtokens' ? limitFromProse(prose) : null,
+    elapsedMs: attempt.elapsedMs,
+  };
+}
+
+// Which words this endpoint uses to say why generation stopped. A normal stop and
+// a forced cut both ask, so two vocabulary entries show up when the endpoint has
+// two. Values pass through the harness's own finish kinds, so this reads the
+// surfaced vocabulary rather than inventing one.
+async function collectFinish(llm, route, signal, timeoutMs) {
+  const stop = await attemptOnce(llm, route, {
+    prompt: 'Say only: ok', maxTokens: 400, signal, timeoutMs,
+  });
+  const cut = await attemptOnce(llm, route, {
+    prompt: 'Count from 1 to 200.', maxTokens: 6, signal, timeoutMs,
+  });
+  const kinds = [...new Set([stop.finishKind, cut.finishKind].filter(Boolean))];
+  return {
+    id: 'finish-vocab',
+    ok: Boolean(stop.ok || cut.ok),
+    value: kinds.join(' · ') || null,
+    kinds,
+    elapsedMs: (stop.elapsedMs || 0) + (cut.elapsedMs || 0),
+  };
+}
+
 async function collectDistribution(llm, route, index, signal, timeoutMs) {
   const prompt = distributionPrompt(index);
   const sample = await streamOnce(llm, route, { prompt, maxTokens: 8192, signal, timeoutMs });
@@ -640,6 +796,7 @@ export async function fingerprintModel(llm, input, signal = new AbortController(
   const runs = [];
   const deterministic = [];
   const tokenizers = [];
+  const errors = [];
   // Two repeats by default: an identity digest means nothing if the backend
   // cannot reproduce its own answer, and a single sample cannot tell. Four extra
   // short calls are cheap next to the seven behavioral probes already in flight.
@@ -657,7 +814,7 @@ export async function fingerprintModel(llm, input, signal = new AbortController(
   const sampleCount = mode === 'full' ? samples : 0;
   const concurrency = Math.max(1, Math.min(4, Number(input.concurrency) || 3));
   try {
-    const [behaviorResults, deterministicResults, tokenizerResults, runResults] = await Promise.all([
+    const [behaviorResults, deterministicResults, tokenizerResults, errorResults, finishResult, runResults] = await Promise.all([
       runPool(behaviorProbes, Math.min(concurrency, 2), async (probe) => {
         try { return await collectBehavior(llm, route, probe, controller.signal, perProbeTimeoutMs); }
         catch (error) {
@@ -676,6 +833,19 @@ export async function fingerprintModel(llm, input, signal = new AbortController(
           return { id: probe.id, ok: false, value: null, code: error?.code || (controller.signal.aborted ? 'ABORTED' : 'PROBE_ERROR'), message: redact(textOf(error)) };
         }
       }),
+      // Refusals are the measurement here, so these never throw on a rejection.
+      runPool(ERROR_PROBES, ERROR_PROBES.length, async (probe) => {
+        try { return await collectError(llm, route, probe, controller.signal, perProbeTimeoutMs); }
+        catch (error) {
+          return { id: probe.id, ok: false, accepted: null, value: null, prose: '', code: error?.code || (controller.signal.aborted ? 'ABORTED' : 'PROBE_ERROR'), message: redact(textOf(error)) };
+        }
+      }),
+      (async () => {
+        try { return await collectFinish(llm, route, controller.signal, perProbeTimeoutMs); }
+        catch (error) {
+          return { id: 'finish-vocab', ok: false, value: null, kinds: [], code: error?.code || (controller.signal.aborted ? 'ABORTED' : 'PROBE_ERROR'), message: redact(textOf(error)) };
+        }
+      })(),
       runPool(Array.from({ length: sampleCount }, (_, index) => index + 1), Math.min(concurrency, 2), async (index) => {
         try { return await collectDistribution(llm, route, index, controller.signal, perProbeTimeoutMs); }
         catch (error) {
@@ -686,9 +856,11 @@ export async function fingerprintModel(llm, input, signal = new AbortController(
     probes.push(...behaviorResults);
     deterministic.push(...deterministicResults);
     tokenizers.push(...tokenizerResults);
+    errors.push(...errorResults);
+    errors.push(finishResult);
     runs.push(...runResults);
     const elapsedMs = Math.round(performance.now() - started);
-    const hasSignal = probes.some((probe) => probe.ok) || deterministic.some((probe) => probe.ok) || tokenizers.some((probe) => probe.ok);
+    const hasSignal = probes.some((probe) => probe.ok) || deterministic.some((probe) => probe.ok) || tokenizers.some((probe) => probe.ok) || errors.some((probe) => probe.ok);
     if (controller.signal.aborted) return { ok: false, type: 'fingerprint', provider, model, startedAt, elapsedMs, code: 'ABORTED', message: redact(textOf(controller.signal.reason)), probes, runs };
     if (!hasSignal) return { ok: false, type: 'fingerprint', provider, model, startedAt, elapsedMs, code: 'FINGERPRINT_FAILED', message: '所有指纹探针均失败', probes, runs };
 
@@ -926,20 +1098,42 @@ export async function fingerprintModel(llm, input, signal = new AbortController(
       tokenizer.reason = 'usage-untrusted';
     }
 
-    // One digest for "which endpoint answered", built from the two signals that
-    // actually identify a model: the greedy answers and the tokenizer vector.
-    // Behavioral checks are only included in full mode — they are identical for a
-    // real model and a relayed one, so folding them in changed the hash without
-    // adding information.
+    // Refusals are the second signal that survives a forged usage counter: the
+    // wording of a vendor's own validation comes from the upstream, and the
+    // stated output cap is a number that differs per family. Both are hashed
+    // after scrubbing per-request identifiers, so the same endpoint yields the
+    // same prose digest on every run while a different upstream does not.
+    const errorProbes = errors.filter((probe) => probe.id !== 'finish-vocab');
+    const finishVocab = errors.find((probe) => probe.id === 'finish-vocab') || null;
+    const proseOf = (probe) => (probe?.prose || '').replace(/\s+/g, ' ').trim();
+    const proseDigest = errorProbes.some((probe) => proseOf(probe))
+      ? createHash('sha256').update(errorProbes.map((probe) => `${probe.id}:${proseOf(probe)}`).sort().join('\n')).digest('hex')
+      : null;
+    const errorProse = {
+      probes: errors,
+      digest: proseDigest,
+      // The figure a vendor states when refusing an absurd output budget.
+      outputLimit: errorProbes.find((probe) => probe.id === 'err-maxtokens' && Number.isFinite(probe.limit))?.limit ?? null,
+      // Whether the endpoint swallowed a value the lab would normally refuse.
+      acceptsTemperature2: errorProbes.find((probe) => probe.id === 'err-temperature')?.accepted ?? null,
+      finish: finishVocab ? { value: finishVocab.value, kinds: finishVocab.kinds || [] } : null,
+    };
+
+    // One digest for "which endpoint answered", built from the signals that
+    // actually identify a model: the greedy answers, the tokenizer vector, and
+    // now the refusal prose. Behavioral checks are only included in full mode —
+    // they are identical for a real model and a relayed one, so folding them in
+    // changed the hash without adding information.
     const fingerprint = createHash('sha256').update(JSON.stringify({
       answers: digestOf(stableAnswers),
       tokenizer: TOKENIZER_IDS.map((id) => tokenizerValues[id] ?? null),
+      prose: proseDigest,
       checks: checks || null,
     })).digest('hex');
 
     return {
       ok: true, type: 'fingerprint', provider, model, startedAt, elapsedMs, fingerprint, responseDigest,
-      mode, identity, deterministic, tokenizer,
+      mode, identity, deterministic, tokenizer, errorProse,
       score: checks ? Math.round(100 * passed / behavioral.length) : null,
       passed, totalChecks: checks ? behavioral.length : null,
       confidence: checks ? Math.round(100 * completed.length / behaviorProbes.length) : null,
@@ -956,6 +1150,7 @@ export async function fingerprintModel(llm, input, signal = new AbortController(
         samples, numbersPerSample: STAT.numbers, range: [STAT.min, STAT.max], bins: STAT.bins, stream: true,
         deterministicRepeats: repeats, deterministicProbeIds: DETERMINISTIC_PROBES.map((probe) => probe.id),
         tokenizerProbeIds: TOKENIZER_PROBES.map((probe) => probe.id), tokenizerVersion: TOKENIZER_VERSION,
+        errorProbeIds: [...ERROR_PROBES.map((probe) => probe.id), 'finish-vocab'],
       },
     };
   } finally {

@@ -137,7 +137,7 @@
   "identityPeers": "同签名模型",
   "identityAlone": "无同签名模型",
   "identityFirstSeen": "首次记录，暂无历史可比",
-  "identityPeerWarn": "该模型与以下条目答出完全相同的身份答案，可能共用同一个后端",
+  "identityPeerWarn": "这些条目答出的偏好答案与它逐项相同。同一后端会这样，但不同厂商也会撞——实测 deepseek 与 glm 都答 42/blue/A/python，所以这里只说明「答案一致」，真伪要看分词器向量",
   "fingerprintBatch": "批量指纹",
   "fingerprintBatchRunning": "批量检测中…",
   "identityChanged": "变化探针",
@@ -170,5 +170,16 @@
   "tokenizerUsageUntrusted": "token 计数不可信",
   "tokenizerUsageUntrustedHint": "该端点回报的输入 token 数与文本长度无关：单字符报 20 个，201 字节的正文只报 3 个。usage 是写死的，而分词器指纹靠这个计数相减，所以这里测不出来；一个连计数都伪造的端点，本身就不该按它宣称的模型对待。",
   "identitySame": "答案相同",
-  "identityComparedUnit": "项可比"
+  "identityComparedUnit": "项可比",
+  "errorProse": "错误文案",
+  "errorProbes": "错误与停止探针",
+  "errorDigest": "文案摘要",
+  "errorOutputLimit": "输出上限",
+  "errorTemp2": "极端温度",
+  "errorAccepted": "接受",
+  "errorRefused": "拒绝",
+  "errorFinish": "停止词表",
+  "errorProseHint": "拒绝原文来自上游自己的参数校验——中转站只转发请求时，这句话是厂商原话；它不读 usage，所以计数被伪造的端点仍能在这里被认出。",
+  "errorProseAcceptedHint": "这次没有触发拒绝：端点直接吞掉了本该被校验拦下的参数，说明请求没有经过严格的厂商校验器，或者网关改写之后再转发——这本身就是一条信息。",
+  "errorNoValidator": "未触发拒绝"
 }
